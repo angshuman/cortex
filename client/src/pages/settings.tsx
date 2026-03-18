@@ -33,6 +33,10 @@ import {
   Vault as VaultIcon,
   ChevronRight,
   Check,
+  Globe,
+  Plug,
+  PlugZap,
+  Loader2,
 } from "lucide-react";
 import { useToast } from "@/hooks/use-toast";
 
@@ -173,30 +177,7 @@ export default function SettingsPage() {
               </Card>
 
               {/* Browser */}
-              <Card className="p-4">
-                <div className="flex items-center gap-2 mb-3">
-                  <Shield className="w-4 h-4 text-primary" />
-                  <h3 className="text-sm font-medium">Browser Backend</h3>
-                </div>
-                <div>
-                  <Label className="text-xs text-muted-foreground">Browser Backend</Label>
-                  <Select
-                    value={config?.browserBackend || "none"}
-                    onValueChange={(v) => updateConfig.mutate({ browserBackend: v })}
-                  >
-                    <SelectTrigger className="mt-1 text-sm h-8">
-                      <SelectValue />
-                    </SelectTrigger>
-                    <SelectContent>
-                      <SelectItem value="none">None</SelectItem>
-                      <SelectItem value="playwright-mcp">Playwright MCP</SelectItem>
-                    </SelectContent>
-                  </Select>
-                  <p className="text-[10px] text-muted-foreground mt-1">
-                    Start Playwright MCP server externally: npx @playwright/mcp@latest
-                  </p>
-                </div>
-              </Card>
+              <BrowserBackendCard config={config} updateConfig={updateConfig} />
 
               {/* Storage */}
               <Card className="p-4">
@@ -445,6 +426,165 @@ function VaultSettingsCard({
             Override the AI model for this vault only (e.g. claude-sonnet-4-20250514, gpt-4o).
           </p>
         </div>
+      </div>
+    </Card>
+  );
+}
+
+/** Browser Backend settings card with MCP status */
+function BrowserBackendCard({
+  config,
+  updateConfig,
+}: {
+  config: any;
+  updateConfig: any;
+}) {
+  const { toast } = useToast();
+  const queryClient = useQueryClient();
+  const [connecting, setConnecting] = useState(false);
+
+  const { data: mcpStatus, refetch: refetchMcpStatus } = useQuery({
+    queryKey: ["/api/mcp/status"],
+    queryFn: () => apiRequest("GET", "/api/mcp/status").then(r => r.json()),
+    refetchInterval: 5000,
+  });
+
+  const isPlaywrightConnected = mcpStatus?.playwright?.connected === true;
+  const playwrightTools = mcpStatus?.playwright?.tools || [];
+  const isEnabled = config?.browserBackend === "playwright-mcp";
+
+  const handleToggle = async (value: string) => {
+    updateConfig.mutate({ browserBackend: value });
+    if (value === "playwright-mcp") {
+      // Auto-connect after enabling
+      setConnecting(true);
+      try {
+        await apiRequest("POST", "/api/mcp/connect");
+        await refetchMcpStatus();
+        toast({ title: "Browser connected", description: "Playwright MCP is now active" });
+      } catch (err: any) {
+        toast({ title: "Connection failed", description: err.message, variant: "destructive" });
+      } finally {
+        setConnecting(false);
+      }
+    } else {
+      // Disconnect
+      try {
+        await apiRequest("POST", "/api/mcp/disconnect");
+        await refetchMcpStatus();
+      } catch (e) {}
+    }
+  };
+
+  const handleReconnect = async () => {
+    setConnecting(true);
+    try {
+      // Disconnect first, then reconnect
+      await apiRequest("POST", "/api/mcp/disconnect");
+      const resp = await apiRequest("POST", "/api/mcp/connect");
+      const result = await resp.json();
+      await refetchMcpStatus();
+      if (result.connected) {
+        toast({ title: "Reconnected", description: "Playwright MCP is active" });
+      } else {
+        toast({ title: "Connection failed", description: "Check that @playwright/mcp is installed", variant: "destructive" });
+      }
+    } catch (err: any) {
+      toast({ title: "Connection failed", description: err.message, variant: "destructive" });
+    } finally {
+      setConnecting(false);
+    }
+  };
+
+  return (
+    <Card className="p-4">
+      <div className="flex items-center gap-2 mb-3">
+        <Globe className="w-4 h-4 text-primary" />
+        <h3 className="text-sm font-medium">Browser Backend</h3>
+        {isEnabled && (
+          <Badge
+            variant={isPlaywrightConnected ? "default" : "secondary"}
+            className={`text-[9px] px-1.5 py-0 h-3.5 ml-auto ${
+              isPlaywrightConnected ? "bg-green-500/20 text-green-400 border-green-500/30" : ""
+            }`}
+          >
+            {isPlaywrightConnected ? "Connected" : "Disconnected"}
+          </Badge>
+        )}
+      </div>
+
+      <div className="space-y-3">
+        <div>
+          <Label className="text-xs text-muted-foreground">Backend</Label>
+          <Select
+            value={config?.browserBackend || "none"}
+            onValueChange={handleToggle}
+          >
+            <SelectTrigger className="mt-1 text-sm h-8">
+              <SelectValue />
+            </SelectTrigger>
+            <SelectContent>
+              <SelectItem value="none">None (disabled)</SelectItem>
+              <SelectItem value="playwright-mcp">Playwright MCP</SelectItem>
+            </SelectContent>
+          </Select>
+        </div>
+
+        {isEnabled && (
+          <>
+            <div className="flex items-center gap-2">
+              {connecting ? (
+                <Button size="sm" variant="outline" className="h-7 text-xs" disabled>
+                  <Loader2 className="w-3 h-3 mr-1.5 animate-spin" />
+                  Connecting...
+                </Button>
+              ) : isPlaywrightConnected ? (
+                <Button size="sm" variant="outline" className="h-7 text-xs" onClick={handleReconnect}>
+                  <PlugZap className="w-3 h-3 mr-1.5" />
+                  Reconnect
+                </Button>
+              ) : (
+                <Button size="sm" variant="outline" className="h-7 text-xs" onClick={handleReconnect}>
+                  <Plug className="w-3 h-3 mr-1.5" />
+                  Connect
+                </Button>
+              )}
+            </div>
+
+            {isPlaywrightConnected && playwrightTools.length > 0 && (
+              <div>
+                <Label className="text-[10px] text-muted-foreground mb-1 block">
+                  {playwrightTools.length} browser tools available
+                </Label>
+                <div className="flex flex-wrap gap-1">
+                  {playwrightTools.slice(0, 12).map((tool: string) => (
+                    <Badge key={tool} variant="secondary" className="text-[9px] font-mono px-1.5 py-0 h-3.5">
+                      {tool}
+                    </Badge>
+                  ))}
+                  {playwrightTools.length > 12 && (
+                    <Badge variant="secondary" className="text-[9px] px-1.5 py-0 h-3.5">
+                      +{playwrightTools.length - 12} more
+                    </Badge>
+                  )}
+                </div>
+              </div>
+            )}
+
+            {!isPlaywrightConnected && !connecting && (
+              <p className="text-[10px] text-muted-foreground">
+                Make sure <code className="text-[10px] bg-muted px-1 rounded">@playwright/mcp</code> is installed:
+                <code className="text-[10px] bg-muted px-1 rounded ml-1">npm install -g @playwright/mcp</code>
+              </p>
+            )}
+          </>
+        )}
+
+        {!isEnabled && (
+          <p className="text-[10px] text-muted-foreground">
+            Enable Playwright MCP to let the AI agent browse websites, fill forms, and interact with web pages.
+          </p>
+        )}
       </div>
     </Card>
   );

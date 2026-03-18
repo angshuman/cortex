@@ -7,6 +7,7 @@ import { rm, readFile } from "fs/promises";
 const allowlist = [
   "@anthropic-ai/sdk",
   "@google/generative-ai",
+  "@modelcontextprotocol/sdk",
   "axios",
   "connect-pg-simple",
   "cors",

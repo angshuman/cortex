@@ -3,6 +3,7 @@ import OpenAI from "openai";
 import fs from "fs";
 import { v4 as uuid } from "uuid";
 import { FileStorage } from "./storage";
+import { mcpManager } from "./mcp-client";
 import type { ChatEvent, Skill, VaultSettings } from "@shared/schema";
 
 type EventCallback = (event: ChatEvent) => void;
@@ -44,7 +45,14 @@ function detectProvider(): { provider: string; model: string } {
 function getToolDefinitions(storage: FileStorage): ToolDef[] {
   const skills = storage.getSkills().filter((s: Skill) => s.enabled);
   const tools: ToolDef[] = [];
+  
+  // Collect skill-defined tool names to avoid duplicates with MCP
+  const skillToolNames = new Set<string>();
+  
   for (const skill of skills) {
+    // Skip the stub browser-use skill if MCP playwright is connected
+    if (skill.name === "browser-use" && mcpManager.isConnected("playwright")) continue;
+    
     for (const tool of skill.tools) {
       const properties: Record<string, any> = {};
       const required: string[] = [];
@@ -61,8 +69,29 @@ function getToolDefinitions(storage: FileStorage): ToolDef[] {
         description: `[${skill.name}] ${tool.description}`,
         parameters: { type: "object" as const, properties, required },
       });
+      skillToolNames.add(tool.name);
     }
   }
+  
+  // Add tools from connected MCP servers (e.g. Playwright browser)
+  const mcpTools = mcpManager.getTools();
+  for (const mcpTool of mcpTools) {
+    // Don't add if a skill already defines this tool name
+    if (skillToolNames.has(mcpTool.name)) continue;
+    
+    // Convert MCP inputSchema to our ToolDef format
+    const schema = mcpTool.inputSchema || {};
+    tools.push({
+      name: mcpTool.name,
+      description: `[browser] ${mcpTool.description}`,
+      parameters: {
+        type: "object" as const,
+        properties: schema.properties || {},
+        required: schema.required || [],
+      },
+    });
+  }
+  
   return tools;
 }
 
@@ -171,12 +200,50 @@ async function executeTool(name: string, args: Record<string, any>, storage: Fil
       }
       case "browser_navigate":
       case "browser_screenshot":
+      case "browser_take_screenshot":
       case "browser_click":
       case "browser_type":
       case "browser_snapshot":
-        return JSON.stringify({ info: "Browser MCP available when Playwright MCP server is configured. Browser headless mode can be changed in vault settings." });
-      default:
+      case "browser_hover":
+      case "browser_press_key":
+      case "browser_tabs":
+      case "browser_fill_form":
+      case "browser_select_option":
+      case "browser_handle_dialog":
+      case "browser_file_upload":
+      case "browser_evaluate":
+      case "browser_drag":
+      case "browser_console_messages":
+      case "browser_wait":
+      case "browser_verify_value":
+      case "browser_mouse_click_xy":
+      case "browser_mouse_drag_xy":
+      case "browser_mouse_move_xy": {
+        // Route through MCP client
+        const server = mcpManager.findServerForTool(name);
+        if (!server) {
+          return JSON.stringify({ error: `Browser tool "${name}" not available. Enable the Playwright browser backend in Settings > General, then ensure the MCP server is running (npx @playwright/mcp).` });
+        }
+        try {
+          const result = await mcpManager.callTool(server, name, args);
+          return result;
+        } catch (err: any) {
+          return JSON.stringify({ error: `Browser tool error: ${err.message}` });
+        }
+      }
+      default: {
+        // Check if any MCP server handles this tool
+        const mcpServer = mcpManager.findServerForTool(name);
+        if (mcpServer) {
+          try {
+            const result = await mcpManager.callTool(mcpServer, name, args);
+            return result;
+          } catch (err: any) {
+            return JSON.stringify({ error: `MCP tool error: ${err.message}` });
+          }
+        }
         return JSON.stringify({ error: `Unknown tool: ${name}` });
+      }
     }
   } catch (err: any) {
     return JSON.stringify({ error: err.message });
@@ -282,16 +349,24 @@ function buildSystemPrompt(storage: FileStorage, vaultSettings?: VaultSettings):
     : "No notes yet.";
 
   const browserMode = vaultSettings?.browserHeadless ? "headless (no visible window)" : "visible (browser window will open)";
+  const browserConnected = mcpManager.isConnected("playwright");
+  const mcpTools = mcpManager.getTools("playwright");
+  const browserStatus = browserConnected
+    ? `Browser is CONNECTED via Playwright MCP (${browserMode} mode). Available browser tools: ${mcpTools.map(t => t.name).join(", ")}.\nWhen browsing, always start with browser_snapshot to see the page accessibility tree, then use ref attributes to interact with elements.`
+    : `Browser is NOT connected. The user needs to enable Playwright in Settings > General > Browser Backend, and ensure @playwright/mcp is installed (npx @playwright/mcp).`;
 
   return `You are Cortex, a personal AI operating system assistant. You are a reasoner, planner, and note-taker.
 
 ## Your Capabilities
 - Create, read, update, and organize notes (markdown with image support)
 - Create, manage, and track tasks and subtasks
-- Browse the web using browser tools (when MCP is configured) — browser runs in ${browserMode} mode
+- Browse the web using Playwright browser automation (see Browser Status below)
 - Search across all notes, tasks, and conversations
 - Plan and reason through complex problems step by step
 - **Vision**: You can see and analyze images pasted into chat
+
+## Browser Status
+${browserStatus}
 
 ## Image Handling
 When a user sends images:

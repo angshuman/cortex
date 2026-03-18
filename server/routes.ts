@@ -3,6 +3,7 @@ import type { Server } from "http";
 import { WebSocketServer, WebSocket } from "ws";
 import { vaultManager, FileStorage } from "./storage";
 import { Agent, type ContextItem } from "./agent";
+import { mcpManager } from "./mcp-client";
 import multer from "multer";
 import path from "path";
 
@@ -261,9 +262,39 @@ export function registerRoutes(server: Server, app: Express) {
     res.json(vaultManager.getConfig());
   });
 
-  app.patch("/api/config", (req, res) => {
+  app.patch("/api/config", async (req, res) => {
     const config = vaultManager.saveConfig(req.body);
+    
+    // If browser backend changed, re-init MCP
+    if (req.body.browserBackend !== undefined) {
+      try {
+        await mcpManager.initPlaywright(config, false);
+      } catch (e) {
+        console.error("[MCP] Failed to re-init after config change:", e);
+      }
+    }
+    
     res.json(config);
+  });
+
+  // ============ MCP STATUS ============
+  app.get("/api/mcp/status", (_req, res) => {
+    res.json(mcpManager.getStatus());
+  });
+
+  app.post("/api/mcp/connect", async (_req, res) => {
+    const config = vaultManager.getConfig();
+    try {
+      const ok = await mcpManager.initPlaywright(config, false);
+      res.json({ connected: ok, status: mcpManager.getStatus() });
+    } catch (err: any) {
+      res.status(500).json({ error: err.message, connected: false });
+    }
+  });
+
+  app.post("/api/mcp/disconnect", async (_req, res) => {
+    await mcpManager.disconnect("playwright");
+    res.json({ connected: false });
   });
 
   // ============ SEARCH (vault-scoped) ============
@@ -282,6 +313,18 @@ export function registerRoutes(server: Server, app: Express) {
       version: "2.0.0",
     });
   });
+
+  // ============ AUTO-INIT MCP ============
+  // Start Playwright MCP if configured
+  const config = vaultManager.getConfig();
+  if (config.browserBackend === "playwright-mcp") {
+    mcpManager.initPlaywright(config, false).then(ok => {
+      if (ok) console.log("[MCP] Playwright browser ready");
+      else console.log("[MCP] Playwright browser failed to start — check that @playwright/mcp is installed");
+    }).catch(err => {
+      console.error("[MCP] Auto-init failed:", err.message);
+    });
+  }
 
   // ============ WEBSOCKET ============
   const wss = new WebSocketServer({ server, path: "/ws" });
@@ -324,6 +367,15 @@ export function registerRoutes(server: Server, app: Express) {
           const resolvedVaultId = vaultId || vaultManager.getDefaultVault().id;
           const store = vaultManager.getStorage(resolvedVaultId);
           const vaultSettings = vaultManager.getVaultSettings(resolvedVaultId);
+
+          // Ensure MCP is connected if browser backend is enabled
+          const globalConfig = vaultManager.getConfig();
+          if (globalConfig.browserBackend === "playwright-mcp" && !mcpManager.isConnected("playwright")) {
+            const headless = vaultSettings?.browserHeadless ?? false;
+            mcpManager.initPlaywright(globalConfig, headless).catch(err => {
+              console.error("[MCP] Auto-connect on chat failed:", err.message);
+            });
+          }
 
           const context: ContextItem[] = data.context || [];
           const agent = new Agent(sessionId, (event) => broadcast(event), context, store, vaultSettings);
