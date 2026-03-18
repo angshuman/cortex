@@ -460,13 +460,14 @@ export function registerRoutes(server: Server, app: Express) {
 
           try {
             await agent.run(data.message || "", images);
-            broadcast({ type: "status", content: "done" });
           } catch (err: any) {
             broadcast({ type: "error", content: err.message });
+          } finally {
+            broadcast({ type: "status", content: "done" });
           }
         }
-      } catch (_err) {
-        // ignore
+      } catch (err) {
+        console.error("[WS] Message handling error:", err);
       }
     });
 

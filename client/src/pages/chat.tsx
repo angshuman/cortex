@@ -43,6 +43,7 @@ export default function ChatPage() {
   const [status, setStatus] = useState<"idle" | "thinking" | "done">("idle");
   const [expandedTools, setExpandedTools] = useState<Set<string>>(new Set());
   const wsRef = useRef<WebSocket | null>(null);
+  const pendingMessageRef = useRef<string | null>(null);
   const scrollRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLTextAreaElement>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
@@ -76,6 +77,13 @@ export default function ChatPage() {
 
     ws.onopen = () => {
       ws.send(JSON.stringify({ type: "join", sessionId }));
+      // If there's a pending message (from creating a new session), send it now
+      const pending = pendingMessageRef.current;
+      if (pending) {
+        pendingMessageRef.current = null;
+        setStatus("thinking");
+        ws.send(pending);
+      }
     };
 
     ws.onmessage = (msg) => {
@@ -91,6 +99,14 @@ export default function ChatPage() {
         }
       } else {
         setEvents(prev => [...prev, data]);
+      }
+    };
+
+    ws.onerror = () => {
+      // Clear any pending message if the connection fails
+      if (pendingMessageRef.current) {
+        pendingMessageRef.current = null;
+        setStatus("idle");
       }
     };
 
@@ -128,24 +144,26 @@ export default function ChatPage() {
         const res = await apiRequest("POST", withVault("/api/chat/sessions", vaultParam), { title: "New Chat" });
         const session = await res.json();
         targetSessionId = session.id;
+        // Queue the message to be sent once the WebSocket connects
+        // (the useEffect for the new sessionId will fire and send it on open)
+        pendingMessageRef.current = JSON.stringify({ ...payload, sessionId: targetSessionId });
+        setStatus("thinking");
         setLocation(`/chat/${session.id}`);
-        // Reconnect ws will happen via useEffect
-        setTimeout(() => {
-          const ws = wsRef.current;
-          if (ws && ws.readyState === WebSocket.OPEN) {
-            ws.send(JSON.stringify({ ...payload, sessionId: targetSessionId }));
-          }
-        }, 500);
         return;
       } catch { return; }
     }
 
+    const message = JSON.stringify({ ...payload, sessionId: targetSessionId });
     const ws = wsRef.current;
     if (ws && ws.readyState === WebSocket.OPEN) {
       setStatus("thinking");
-      ws.send(JSON.stringify({ ...payload, sessionId: targetSessionId }));
+      ws.send(message);
+    } else {
+      // WebSocket not yet open — queue the message to be sent when it connects
+      pendingMessageRef.current = message;
+      setStatus("thinking");
     }
-  }, [input, sessionId, status, setLocation, uploadedImages, isUploading, clearImages]);
+  }, [input, sessionId, status, setLocation, vaultId, vaultParam, uploadedImages, isUploading, clearImages]);
 
   const handleKeyDown = (e: React.KeyboardEvent) => {
     if (e.key === "Enter" && !e.shiftKey) {

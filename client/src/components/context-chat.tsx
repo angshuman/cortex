@@ -52,6 +52,7 @@ export function ContextChat({ context, open, onClose, placeholder }: ContextChat
   const [sessionId, setSessionId] = useState<string | null>(null);
   const [expandedTools, setExpandedTools] = useState<Set<string>>(new Set());
   const wsRef = useRef<WebSocket | null>(null);
+  const pendingMessageRef = useRef<string | null>(null);
   const scrollRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLTextAreaElement>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
@@ -90,6 +91,13 @@ export function ContextChat({ context, open, onClose, placeholder }: ContextChat
 
     ws.onopen = () => {
       ws.send(JSON.stringify({ type: "join", sessionId }));
+      // If there's a pending message (from creating a new session), send it now
+      const pending = pendingMessageRef.current;
+      if (pending) {
+        pendingMessageRef.current = null;
+        setStatus("thinking");
+        ws.send(pending);
+      }
     };
 
     ws.onmessage = (msg) => {
@@ -103,6 +111,13 @@ export function ContextChat({ context, open, onClose, placeholder }: ContextChat
         }
       } else {
         setEvents(prev => [...prev, data]);
+      }
+    };
+
+    ws.onerror = () => {
+      if (pendingMessageRef.current) {
+        pendingMessageRef.current = null;
+        setStatus("idle");
       }
     };
 
@@ -146,25 +161,25 @@ export function ContextChat({ context, open, onClose, placeholder }: ContextChat
         const res = await apiRequest("POST", withVault("/api/chat/sessions", vaultParam), { title: contextTitle });
         const session = await res.json();
         sid = session.id;
+        // Queue the message to be sent once the WebSocket connects
+        pendingMessageRef.current = JSON.stringify({ ...payload, sessionId: sid });
+        setStatus("thinking");
         setSessionId(session.id);
-        // Wait for WS connection
-        setTimeout(() => {
-          const ws = wsRef.current;
-          if (ws && ws.readyState === WebSocket.OPEN) {
-            setStatus("thinking");
-            ws.send(JSON.stringify({ ...payload, sessionId: sid }));
-          }
-        }, 600);
         return;
       } catch { return; }
     }
 
+    const message = JSON.stringify({ ...payload, sessionId: sid });
     const ws = wsRef.current;
     if (ws && ws.readyState === WebSocket.OPEN) {
       setStatus("thinking");
-      ws.send(JSON.stringify({ ...payload, sessionId: sid }));
+      ws.send(message);
+    } else {
+      // WebSocket not yet open — queue the message
+      pendingMessageRef.current = message;
+      setStatus("thinking");
     }
-  }, [input, sessionId, status, context, uploadedImages, isUploading, clearImages]);
+  }, [input, sessionId, status, context, vaultId, vaultParam, uploadedImages, isUploading, clearImages]);
 
   const handleKeyDown = (e: React.KeyboardEvent) => {
     if (e.key === "Enter" && !e.shiftKey) {
