@@ -73,11 +73,15 @@ export default function NotesPage() {
   const { data: notes = [] } = useQuery<Note[]>({
     queryKey: ["/api/notes"],
     queryFn: () => apiRequest("GET", "/api/notes").then(r => r.json()),
+    staleTime: 0,
+    refetchOnMount: "always",
   });
 
   const { data: folders = [] } = useQuery<string[]>({
     queryKey: ["/api/notes/folders"],
     queryFn: () => apiRequest("GET", "/api/notes/folders").then(r => r.json()),
+    staleTime: 0,
+    refetchOnMount: "always",
   });
 
   const createNote = useMutation({

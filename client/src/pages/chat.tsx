@@ -82,6 +82,10 @@ export default function ChatPage() {
         setStatus(data.content === "thinking" ? "thinking" : data.content === "done" ? "idle" : "idle");
         if (data.content === "done") {
           queryClient.invalidateQueries({ queryKey: ["/api/chat/sessions"] });
+          // AI may have created notes/tasks via tools — invalidate so other pages refresh
+          queryClient.invalidateQueries({ queryKey: ["/api/notes"] });
+          queryClient.invalidateQueries({ queryKey: ["/api/notes/folders"] });
+          queryClient.invalidateQueries({ queryKey: ["/api/tasks"] });
         }
       } else {
         setEvents(prev => [...prev, data]);

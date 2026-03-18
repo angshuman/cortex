@@ -96,6 +96,7 @@ export function ContextChat({ context, open, onClose, placeholder }: ContextChat
         setStatus(data.content === "thinking" ? "thinking" : "idle");
         if (data.content === "done") {
           queryClient.invalidateQueries({ queryKey: ["/api/notes"] });
+          queryClient.invalidateQueries({ queryKey: ["/api/notes/folders"] });
           queryClient.invalidateQueries({ queryKey: ["/api/tasks"] });
         }
       } else {

@@ -84,6 +84,8 @@ export default function TasksPage() {
   const { data: tasks = [] } = useQuery<Task[]>({
     queryKey: ["/api/tasks"],
     queryFn: () => apiRequest("GET", "/api/tasks").then(r => r.json()),
+    staleTime: 0,             // Always consider stale so navigation triggers refetch
+    refetchOnMount: "always", // Refetch every time we navigate to this page
   });
 
   const createTask = useMutation({
