@@ -207,15 +207,24 @@ Always be concise but thorough. Use markdown formatting in responses.
 ${skillInstructions}`;
 }
 
+export interface ContextItem {
+  type: "note" | "task" | "text";
+  title: string;
+  content: string;
+  id?: string;
+}
+
 export class Agent {
   private messages: AgentMessage[] = [];
   private sessionId: string;
   private onEvent: EventCallback;
   private maxSteps = 10;
+  private context: ContextItem[] = [];
 
-  constructor(sessionId: string, onEvent: EventCallback) {
+  constructor(sessionId: string, onEvent: EventCallback, context?: ContextItem[]) {
     this.sessionId = sessionId;
     this.onEvent = onEvent;
+    this.context = context || [];
   }
 
   private emit(type: ChatEvent["type"], content: string, metadata?: Record<string, any>) {
@@ -240,7 +249,19 @@ export class Agent {
       return;
     }
 
-    const systemPrompt = buildSystemPrompt();
+    let systemPrompt = buildSystemPrompt();
+
+    // Inject context items into system prompt
+    if (this.context.length > 0) {
+      const contextBlock = this.context.map((item, i) => {
+        const header = item.type === "note" ? `Note: "${item.title}"` :
+                       item.type === "task" ? `Task: "${item.title}"` :
+                       `Context: "${item.title}"`;
+        return `### ${header}\n${item.content}`;
+      }).join("\n\n");
+      systemPrompt += `\n\n## Active Context\nThe user is viewing the following items. Reference them directly when relevant.\n\n${contextBlock}`;
+    }
+
     const tools = getToolDefinitions();
 
     try {

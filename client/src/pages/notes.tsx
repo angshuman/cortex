@@ -36,7 +36,9 @@ import {
   Pin,
   Upload,
   Search,
+  MessageSquare,
 } from "lucide-react";
+import { ContextChat, type ContextItem } from "@/components/context-chat";
 import { marked } from "marked";
 import { useToast } from "@/hooks/use-toast";
 
@@ -62,6 +64,7 @@ export default function NotesPage() {
   const [showNewNote, setShowNewNote] = useState(false);
   const [newTitle, setNewTitle] = useState("");
   const [newFolder, setNewFolder] = useState("/");
+  const [chatOpen, setChatOpen] = useState(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
   const dumpFileRef = useRef<HTMLInputElement>(null);
   const queryClient = useQueryClient();
@@ -166,6 +169,15 @@ export default function NotesPage() {
         <FileText className="w-4 h-4 text-muted-foreground" />
         <span className="text-sm font-medium">Notes</span>
         <div className="ml-auto flex items-center gap-2">
+          <Button
+            size="sm"
+            variant={chatOpen ? "secondary" : "ghost"}
+            className="text-xs gap-1"
+            onClick={() => setChatOpen(!chatOpen)}
+            data-testid="button-toggle-chat"
+          >
+            <MessageSquare className="w-3.5 h-3.5" /> AI
+          </Button>
           <Button size="sm" variant="ghost" className="text-xs gap-1" onClick={() => {
             dumpFileRef.current?.click();
           }}>
@@ -251,7 +263,7 @@ export default function NotesPage() {
         </div>
 
         {/* Note content area */}
-        <div className="flex-1 flex flex-col min-w-0">
+        <div className={`flex-1 flex flex-col min-w-0 ${chatOpen ? 'max-w-[calc(100%-20rem-18rem)]' : ''}`}>
           {!selectedNote ? (
             <div className="flex-1 flex items-center justify-center">
               <div className="text-center">
@@ -321,6 +333,19 @@ export default function NotesPage() {
             </>
           )}
         </div>
+
+        {/* Context-aware AI chat panel */}
+        <ContextChat
+          open={chatOpen}
+          onClose={() => setChatOpen(false)}
+          context={selectedNote ? [{
+            type: "note" as const,
+            title: selectedNote.title,
+            content: selectedNote.content,
+            id: selectedNote.id,
+          }] : []}
+          placeholder={selectedNote ? `Ask about "${selectedNote.title}"...` : "Select a note first..."}
+        />
       </div>
 
       {/* New note dialog */}

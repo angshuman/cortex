@@ -33,7 +33,9 @@ import {
   ChevronRight,
   Edit3,
   X,
+  MessageSquare,
 } from "lucide-react";
+import { ContextChat, type ContextItem } from "@/components/context-chat";
 import { useToast } from "@/hooks/use-toast";
 
 interface Task {
@@ -75,6 +77,7 @@ export default function TasksPage() {
   const [newDueDate, setNewDueDate] = useState("");
   const [newParentId, setNewParentId] = useState<string>("");
   const [filterStatus, setFilterStatus] = useState<string>("all");
+  const [chatOpen, setChatOpen] = useState(false);
   const queryClient = useQueryClient();
   const { toast } = useToast();
 
@@ -300,28 +303,52 @@ export default function TasksPage() {
               <List className="w-3 h-3" />
             </Button>
           </div>
+          <Button
+            size="sm"
+            variant={chatOpen ? "secondary" : "ghost"}
+            className="text-xs gap-1"
+            onClick={() => setChatOpen(!chatOpen)}
+            data-testid="button-toggle-chat"
+          >
+            <MessageSquare className="w-3.5 h-3.5" /> AI
+          </Button>
           <Button size="sm" variant="default" className="text-xs gap-1" onClick={() => setShowNewTask(true)} data-testid="button-new-task">
             <Plus className="w-3.5 h-3.5" /> New Task
           </Button>
         </div>
       </header>
 
-      <div className="flex-1 overflow-auto p-4">
-        {view === "kanban" ? (
-          <div className="flex gap-4 h-full">
-            {["todo", "in_progress", "done"].map(s => renderKanbanColumn(s))}
-          </div>
-        ) : (
-          <div className="max-w-3xl mx-auto">
-            {topLevelTasks.length === 0 && (
-              <div className="text-center py-16">
-                <CheckSquare className="w-10 h-10 text-muted-foreground/30 mx-auto mb-3" />
-                <p className="text-sm text-muted-foreground">No tasks yet. Create one to get started.</p>
-              </div>
-            )}
-            {topLevelTasks.map(t => renderTaskCard(t))}
-          </div>
-        )}
+      <div className="flex-1 flex min-h-0">
+        <div className="flex-1 overflow-auto p-4">
+          {view === "kanban" ? (
+            <div className="flex gap-4 h-full">
+              {["todo", "in_progress", "done"].map(s => renderKanbanColumn(s))}
+            </div>
+          ) : (
+            <div className="max-w-3xl mx-auto">
+              {topLevelTasks.length === 0 && (
+                <div className="text-center py-16">
+                  <CheckSquare className="w-10 h-10 text-muted-foreground/30 mx-auto mb-3" />
+                  <p className="text-sm text-muted-foreground">No tasks yet. Create one to get started.</p>
+                </div>
+              )}
+              {topLevelTasks.map(t => renderTaskCard(t))}
+            </div>
+          )}
+        </div>
+
+        {/* Context-aware AI chat panel */}
+        <ContextChat
+          open={chatOpen}
+          onClose={() => setChatOpen(false)}
+          context={filteredTasks.filter(t => t.status !== "archived").slice(0, 20).map(t => ({
+            type: "task" as const,
+            title: t.title,
+            content: `Status: ${t.status} | Priority: ${t.priority}${t.description ? " | " + t.description : ""}${t.dueDate ? " | Due: " + t.dueDate : ""}`,
+            id: t.id,
+          }))}
+          placeholder="Ask about your tasks..."
+        />
       </div>
 
       {/* New task dialog */}

@@ -2,7 +2,7 @@ import type { Express } from "express";
 import type { Server } from "http";
 import { WebSocketServer, WebSocket } from "ws";
 import { storage } from "./storage";
-import { Agent } from "./agent";
+import { Agent, type ContextItem } from "./agent";
 import multer from "multer";
 import path from "path";
 
@@ -206,7 +206,8 @@ export function registerRoutes(server: Server, app: Express) {
             }
           };
 
-          const agent = new Agent(sessionId, (event) => broadcast(event));
+          const context: ContextItem[] = data.context || [];
+          const agent = new Agent(sessionId, (event) => broadcast(event), context);
 
           if (!activeAgents.has(sessionId)) {
             activeAgents.set(sessionId, { agent, ws: new Set([ws]) });
