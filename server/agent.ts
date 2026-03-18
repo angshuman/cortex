@@ -4,7 +4,7 @@ import fs from "fs";
 import { v4 as uuid } from "uuid";
 import { FileStorage } from "./storage";
 import { mcpManager } from "./mcp-client";
-import type { ChatEvent, Skill, VaultSettings } from "@shared/schema";
+import type { ChatEvent, Skill, VaultSettings, AgentSettings } from "@shared/schema";
 
 type EventCallback = (event: ChatEvent) => void;
 
@@ -95,7 +95,7 @@ function getToolDefinitions(storage: FileStorage): ToolDef[] {
   return tools;
 }
 
-async function executeTool(name: string, args: Record<string, any>, storage: FileStorage): Promise<string> {
+async function executeTool(name: string, args: Record<string, any>, storage: FileStorage, agentSettings: AgentSettings = defaultAgentSettings): Promise<string> {
   try {
     switch (name) {
       case "create_note": {
@@ -181,7 +181,7 @@ async function executeTool(name: string, args: Record<string, any>, storage: Fil
         try {
           const resp = await fetch(url, {
             headers: { "User-Agent": "Cortex/1.0", "Accept": "application/json, text/html, */*" },
-            signal: AbortSignal.timeout(15000),
+            signal: AbortSignal.timeout(agentSettings.fetchTimeout),
           });
           if (!resp.ok) throw new Error(`HTTP ${resp.status} ${resp.statusText}`);
           const contentType = resp.headers.get("content-type") || "";
@@ -192,7 +192,7 @@ async function executeTool(name: string, args: Record<string, any>, storage: Fil
             body = await resp.text();
           }
           // Truncate very large responses
-          if (body.length > 15000) body = body.slice(0, 15000) + "\n... (truncated)";
+          if (body.length > agentSettings.fetchMaxLength) body = body.slice(0, agentSettings.fetchMaxLength) + "\n... (truncated)";
           return JSON.stringify({ url, contentType, body });
         } catch (err: any) {
           return JSON.stringify({ error: `Fetch failed: ${err.message}` });
@@ -336,7 +336,7 @@ function messagesToOpenAI(messages: AgentMessage[], systemPrompt: string, storag
   return result;
 }
 
-function buildSystemPrompt(storage: FileStorage, vaultSettings?: VaultSettings): string {
+function buildSystemPrompt(storage: FileStorage, vaultSettings?: VaultSettings, agentSettings?: AgentSettings): string {
   const skills = storage.getSkills().filter((s: Skill) => s.enabled);
   const skillInstructions = skills.map((s: Skill) => s.instructions).filter(Boolean).join("\n\n");
   const notes = storage.getNotes();
@@ -394,7 +394,7 @@ When given a complex request:
 
 Always be concise but thorough. Use markdown formatting in responses.
 
-${skillInstructions}`;
+${skillInstructions}${agentSettings?.systemPromptSuffix ? `\n\n## Custom Instructions\n${agentSettings.systemPromptSuffix}` : ""}`;
 }
 
 export interface ContextItem {
@@ -404,20 +404,30 @@ export interface ContextItem {
   id?: string;
 }
 
+const defaultAgentSettings: AgentSettings = {
+  maxTurns: 10,
+  maxTokens: 4096,
+  temperature: 0.7,
+  fetchTimeout: 15000,
+  fetchMaxLength: 15000,
+  systemPromptSuffix: "",
+};
+
 export class Agent {
   private messages: AgentMessage[] = [];
   private sessionId: string;
   private onEvent: EventCallback;
-  private maxSteps = 10;
   private context: ContextItem[] = [];
   private storage: FileStorage;
   private vaultSettings: VaultSettings;
+  private agentSettings: AgentSettings;
 
-  constructor(sessionId: string, onEvent: EventCallback, context?: ContextItem[], storage?: FileStorage, vaultSettings?: VaultSettings) {
+  constructor(sessionId: string, onEvent: EventCallback, context?: ContextItem[], storage?: FileStorage, vaultSettings?: VaultSettings, agentSettings?: AgentSettings) {
     this.sessionId = sessionId;
     this.onEvent = onEvent;
     this.context = context || [];
     this.vaultSettings = vaultSettings || { folderPath: null, browserHeadless: false, aiModel: null };
+    this.agentSettings = agentSettings || defaultAgentSettings;
     // Use provided vault-scoped storage, or import the default
     this.storage = storage || require("./storage").storage;
     // Rebuild conversation history from persisted session events
@@ -519,7 +529,7 @@ export class Agent {
       return;
     }
 
-    let systemPrompt = buildSystemPrompt(this.storage, this.vaultSettings);
+    let systemPrompt = buildSystemPrompt(this.storage, this.vaultSettings, this.agentSettings);
 
     // Inject context items into system prompt
     if (this.context.length > 0) {
@@ -554,14 +564,16 @@ export class Agent {
     }));
 
     let step = 0;
-    while (step < this.maxSteps) {
+    const maxTurns = this.agentSettings.maxTurns;
+    while (step < maxTurns) {
       step++;
       const msgs = messagesToClaude(this.messages, this.storage);
-      this.emit("thought", `Reasoning... (step ${step}/${this.maxSteps})`);
+      this.emit("thought", `Reasoning... (step ${step}/${maxTurns})`);
 
       const response = await client.messages.create({
         model,
-        max_tokens: 4096,
+        max_tokens: this.agentSettings.maxTokens,
+        ...(this.agentSettings.temperature !== undefined ? { temperature: this.agentSettings.temperature } : {}),
         system: systemPrompt,
         messages: msgs,
         tools: claudeTools.length > 0 ? claudeTools : undefined,
@@ -576,7 +588,7 @@ export class Agent {
         } else if (block.type === "tool_use") {
           hasToolUse = true;
           this.emit("tool_call", JSON.stringify({ name: block.name, args: block.input }), { tool: block.name });
-          const result = await executeTool(block.name, block.input as Record<string, any>, this.storage);
+          const result = await executeTool(block.name, block.input as Record<string, any>, this.storage, this.agentSettings);
           this.emit("tool_result", result, { tool: block.name });
           this.messages.push({ role: "assistant", content: `[Tool: ${block.name}] ${JSON.stringify(block.input)}` });
           this.messages.push({ role: "user", content: `[Tool Result for ${block.name}]: ${result}` });
@@ -610,15 +622,17 @@ export class Agent {
     let step = 0;
     const openaiMessages: any[] = messagesToOpenAI(this.messages, systemPrompt, this.storage);
 
-    while (step < this.maxSteps) {
+    const maxTurns = this.agentSettings.maxTurns;
+    while (step < maxTurns) {
       step++;
-      this.emit("thought", `Reasoning... (step ${step}/${this.maxSteps})`);
+      this.emit("thought", `Reasoning... (step ${step}/${maxTurns})`);
 
       const response = await client.chat.completions.create({
         model,
         messages: openaiMessages,
         tools: openaiTools.length > 0 ? openaiTools : undefined,
-        max_tokens: 4096,
+        max_tokens: this.agentSettings.maxTokens,
+        ...(this.agentSettings.temperature !== undefined ? { temperature: this.agentSettings.temperature } : {}),
       } as any);
 
       const choice = response.choices[0];
@@ -635,7 +649,7 @@ export class Agent {
           const fn = tc.function;
           const args = JSON.parse(fn.arguments);
           this.emit("tool_call", JSON.stringify({ name: fn.name, args }), { tool: fn.name });
-          const result = await executeTool(fn.name, args, this.storage);
+          const result = await executeTool(fn.name, args, this.storage, this.agentSettings);
           this.emit("tool_result", result, { tool: fn.name });
           openaiMessages.push({ role: "tool", tool_call_id: tc.id, content: result });
           this.messages.push({ role: "user", content: `[Tool Result for ${fn.name}]: ${result}` });

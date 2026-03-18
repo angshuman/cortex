@@ -37,6 +37,11 @@ import {
   Plug,
   PlugZap,
   Loader2,
+  SlidersHorizontal,
+  MessageSquare,
+  Timer,
+  FileText,
+  Thermometer,
 } from "lucide-react";
 import { useToast } from "@/hooks/use-toast";
 
@@ -152,6 +157,9 @@ export default function SettingsPage() {
                   </div>
                 </div>
               </Card>
+
+              {/* Agent Settings */}
+              <AgentSettingsCard config={config} updateConfig={updateConfig} />
 
               {/* Vector Search */}
               <Card className="p-4">
@@ -424,6 +432,188 @@ function VaultSettingsCard({
           </div>
           <p className="text-[10px] text-muted-foreground mt-1">
             Override the AI model for this vault only (e.g. claude-sonnet-4-20250514, gpt-4o).
+          </p>
+        </div>
+      </div>
+    </Card>
+  );
+}
+
+/** Agent tuning settings card */
+function AgentSettingsCard({
+  config,
+  updateConfig,
+}: {
+  config: any;
+  updateConfig: any;
+}) {
+  const agent = config?.agent || {};
+  const [maxTurns, setMaxTurns] = useState(String(agent.maxTurns ?? 10));
+  const [maxTokens, setMaxTokens] = useState(String(agent.maxTokens ?? 4096));
+  const [temperature, setTemperature] = useState(String(agent.temperature ?? 0.7));
+  const [fetchTimeout, setFetchTimeout] = useState(String(agent.fetchTimeout ?? 15000));
+  const [fetchMaxLength, setFetchMaxLength] = useState(String(agent.fetchMaxLength ?? 15000));
+  const [systemPromptSuffix, setSystemPromptSuffix] = useState(agent.systemPromptSuffix ?? "");
+
+  // Sync when config changes externally
+  useEffect(() => {
+    const a = config?.agent || {};
+    setMaxTurns(String(a.maxTurns ?? 10));
+    setMaxTokens(String(a.maxTokens ?? 4096));
+    setTemperature(String(a.temperature ?? 0.7));
+    setFetchTimeout(String(a.fetchTimeout ?? 15000));
+    setFetchMaxLength(String(a.fetchMaxLength ?? 15000));
+    setSystemPromptSuffix(a.systemPromptSuffix ?? "");
+  }, [config]);
+
+  const saveField = (field: string, raw: string, type: "int" | "float" = "int") => {
+    const value = type === "float" ? parseFloat(raw) : parseInt(raw, 10);
+    if (isNaN(value)) return;
+    updateConfig.mutate({ agent: { ...config?.agent, [field]: value } });
+  };
+
+  const savePromptSuffix = () => {
+    updateConfig.mutate({ agent: { ...config?.agent, systemPromptSuffix } });
+  };
+
+  return (
+    <Card className="p-4">
+      <div className="flex items-center gap-2 mb-3">
+        <SlidersHorizontal className="w-4 h-4 text-primary" />
+        <h3 className="text-sm font-medium">Agent</h3>
+      </div>
+
+      <div className="space-y-4">
+        {/* Row 1: Max Turns + Max Tokens */}
+        <div className="grid grid-cols-2 gap-3">
+          <div>
+            <Label className="text-xs text-muted-foreground flex items-center gap-1.5 mb-1">
+              <MessageSquare className="w-3 h-3" />
+              Max Turns
+            </Label>
+            <Input
+              className="text-xs h-8 font-mono"
+              type="number"
+              min={1}
+              max={50}
+              value={maxTurns}
+              onChange={(e) => setMaxTurns(e.target.value)}
+              onBlur={() => saveField("maxTurns", maxTurns)}
+              onKeyDown={(e) => { if (e.key === "Enter") saveField("maxTurns", maxTurns); }}
+              data-testid="input-max-turns"
+            />
+            <p className="text-[10px] text-muted-foreground mt-0.5">
+              Tool-call loops per message (1–50)
+            </p>
+          </div>
+          <div>
+            <Label className="text-xs text-muted-foreground flex items-center gap-1.5 mb-1">
+              <FileText className="w-3 h-3" />
+              Max Tokens
+            </Label>
+            <Input
+              className="text-xs h-8 font-mono"
+              type="number"
+              min={256}
+              max={32768}
+              step={256}
+              value={maxTokens}
+              onChange={(e) => setMaxTokens(e.target.value)}
+              onBlur={() => saveField("maxTokens", maxTokens)}
+              onKeyDown={(e) => { if (e.key === "Enter") saveField("maxTokens", maxTokens); }}
+              data-testid="input-max-tokens"
+            />
+            <p className="text-[10px] text-muted-foreground mt-0.5">
+              Response length limit (256–32768)
+            </p>
+          </div>
+        </div>
+
+        {/* Row 2: Temperature */}
+        <div>
+          <Label className="text-xs text-muted-foreground flex items-center gap-1.5 mb-1">
+            <Thermometer className="w-3 h-3" />
+            Temperature: {temperature}
+          </Label>
+          <Input
+            className="text-xs h-8 font-mono"
+            type="number"
+            min={0}
+            max={2}
+            step={0.1}
+            value={temperature}
+            onChange={(e) => setTemperature(e.target.value)}
+            onBlur={() => saveField("temperature", temperature, "float")}
+            onKeyDown={(e) => { if (e.key === "Enter") saveField("temperature", temperature, "float"); }}
+            data-testid="input-temperature"
+          />
+          <p className="text-[10px] text-muted-foreground mt-0.5">
+            0 = deterministic, 1 = balanced, 2 = creative
+          </p>
+        </div>
+
+        {/* Row 3: Fetch settings */}
+        <div className="grid grid-cols-2 gap-3">
+          <div>
+            <Label className="text-xs text-muted-foreground flex items-center gap-1.5 mb-1">
+              <Timer className="w-3 h-3" />
+              Fetch Timeout (ms)
+            </Label>
+            <Input
+              className="text-xs h-8 font-mono"
+              type="number"
+              min={1000}
+              max={120000}
+              step={1000}
+              value={fetchTimeout}
+              onChange={(e) => setFetchTimeout(e.target.value)}
+              onBlur={() => saveField("fetchTimeout", fetchTimeout)}
+              onKeyDown={(e) => { if (e.key === "Enter") saveField("fetchTimeout", fetchTimeout); }}
+              data-testid="input-fetch-timeout"
+            />
+            <p className="text-[10px] text-muted-foreground mt-0.5">
+              web_fetch timeout
+            </p>
+          </div>
+          <div>
+            <Label className="text-xs text-muted-foreground flex items-center gap-1.5 mb-1">
+              <FileText className="w-3 h-3" />
+              Fetch Max Length
+            </Label>
+            <Input
+              className="text-xs h-8 font-mono"
+              type="number"
+              min={1000}
+              max={200000}
+              step={1000}
+              value={fetchMaxLength}
+              onChange={(e) => setFetchMaxLength(e.target.value)}
+              onBlur={() => saveField("fetchMaxLength", fetchMaxLength)}
+              onKeyDown={(e) => { if (e.key === "Enter") saveField("fetchMaxLength", fetchMaxLength); }}
+              data-testid="input-fetch-max-length"
+            />
+            <p className="text-[10px] text-muted-foreground mt-0.5">
+              Max chars from web_fetch
+            </p>
+          </div>
+        </div>
+
+        {/* Row 4: System Prompt Suffix */}
+        <div>
+          <Label className="text-xs text-muted-foreground flex items-center gap-1.5 mb-1">
+            <Brain className="w-3 h-3" />
+            Custom System Prompt
+          </Label>
+          <textarea
+            className="w-full text-xs font-mono bg-background border border-input rounded-md px-3 py-2 min-h-[60px] resize-y focus:outline-none focus:ring-1 focus:ring-ring"
+            placeholder="Additional instructions appended to the system prompt..."
+            value={systemPromptSuffix}
+            onChange={(e) => setSystemPromptSuffix(e.target.value)}
+            onBlur={savePromptSuffix}
+            data-testid="textarea-system-prompt"
+          />
+          <p className="text-[10px] text-muted-foreground mt-0.5">
+            Appended as "Custom Instructions" to every system prompt. Use for persona, style, or domain-specific rules.
           </p>
         </div>
       </div>

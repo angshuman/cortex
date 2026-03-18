@@ -132,6 +132,22 @@ export const skillSchema = z.object({
 export type Skill = z.infer<typeof skillSchema>;
 
 // ============ CONFIG ============
+export const agentSettingsSchema = z.object({
+  /** Max agentic reasoning turns per message (tool-call loops). Default 10. */
+  maxTurns: z.number().min(1).max(50).default(10),
+  /** Max tokens for LLM response. Default 4096. */
+  maxTokens: z.number().min(256).max(32768).default(4096),
+  /** LLM temperature (0 = deterministic, 1 = creative). Default 0.7. */
+  temperature: z.number().min(0).max(2).default(0.7),
+  /** web_fetch timeout in milliseconds. Default 15000. */
+  fetchTimeout: z.number().min(1000).max(120000).default(15000),
+  /** web_fetch max response length in characters. Default 15000. */
+  fetchMaxLength: z.number().min(1000).max(200000).default(15000),
+  /** Custom text appended to the system prompt. */
+  systemPromptSuffix: z.string().default(""),
+});
+export type AgentSettings = z.infer<typeof agentSettingsSchema>;
+
 export const configSchema = z.object({
   dataDir: z.string().default("~/.cortex"),
   aiProvider: z.enum(["claude", "openai", "grok"]).default("claude"),
@@ -144,6 +160,7 @@ export const configSchema = z.object({
     env: z.record(z.string()).optional(),
   })).default({}),
   theme: z.enum(["light", "dark", "system"]).default("system"),
+  agent: agentSettingsSchema.default({}),
 });
 export type Config = z.infer<typeof configSchema>;
 

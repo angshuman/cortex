@@ -713,6 +713,14 @@ export class VaultManager {
         browserBackend: "none" as const,
         mcpServers: {},
         theme: "system" as const,
+        agent: {
+          maxTurns: 10,
+          maxTokens: 4096,
+          temperature: 0.7,
+          fetchTimeout: 15000,
+          fetchMaxLength: 15000,
+          systemPromptSuffix: "",
+        },
       };
       writeJson(configPath, config);
       return config as Config;

@@ -378,7 +378,8 @@ export function registerRoutes(server: Server, app: Express) {
           }
 
           const context: ContextItem[] = data.context || [];
-          const agent = new Agent(sessionId, (event) => broadcast(event), context, store, vaultSettings);
+          const agentSettings = globalConfig.agent || undefined;
+          const agent = new Agent(sessionId, (event) => broadcast(event), context, store, vaultSettings, agentSettings);
 
           if (!activeAgents.has(sessionId)) {
             activeAgents.set(sessionId, { agent, ws: new Set([ws]) });
