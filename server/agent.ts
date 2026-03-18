@@ -111,8 +111,50 @@ async function executeTool(name: string, args: Record<string, any>): Promise<str
         if (!task) return JSON.stringify({ error: "Task not found" });
         return JSON.stringify({ success: true, task: { id: task.id, title: task.title, status: "done" } });
       }
-      case "web_search":
-        return JSON.stringify({ info: "Web search not configured. Use browser tools or connect a search provider." });
+      case "web_search": {
+        const query = args.query || "";
+        try {
+          // Use HackerNews Algolia API as a built-in search source
+          const searchUrl = `https://hn.algolia.com/api/v1/search?query=${encodeURIComponent(query)}&tags=story&hitsPerPage=10`;
+          const resp = await fetch(searchUrl);
+          if (!resp.ok) throw new Error(`Search failed: ${resp.status}`);
+          const data = await resp.json() as any;
+          const results = (data.hits || []).map((h: any) => ({
+            title: h.title,
+            url: h.url || `https://news.ycombinator.com/item?id=${h.objectID}`,
+            points: h.points,
+            author: h.author,
+            date: h.created_at,
+            comments: h.num_comments,
+            hnUrl: `https://news.ycombinator.com/item?id=${h.objectID}`,
+          }));
+          return JSON.stringify({ source: "Hacker News", results });
+        } catch (err: any) {
+          return JSON.stringify({ error: `Search failed: ${err.message}` });
+        }
+      }
+      case "web_fetch": {
+        const url = args.url || "";
+        try {
+          const resp = await fetch(url, {
+            headers: { "User-Agent": "Cortex/1.0", "Accept": "application/json, text/html, */*" },
+            signal: AbortSignal.timeout(15000),
+          });
+          if (!resp.ok) throw new Error(`HTTP ${resp.status} ${resp.statusText}`);
+          const contentType = resp.headers.get("content-type") || "";
+          let body: string;
+          if (contentType.includes("json")) {
+            body = JSON.stringify(await resp.json(), null, 2);
+          } else {
+            body = await resp.text();
+          }
+          // Truncate very large responses
+          if (body.length > 15000) body = body.slice(0, 15000) + "\n... (truncated)";
+          return JSON.stringify({ url, contentType, body });
+        } catch (err: any) {
+          return JSON.stringify({ error: `Fetch failed: ${err.message}` });
+        }
+      }
       case "browser_navigate":
       case "browser_screenshot":
       case "browser_click":

@@ -371,12 +371,15 @@ export class FileStorage {
       },
       {
         name: "web-search",
-        description: "Search the web for information",
-        version: "1.0.0",
-        instructions: "You can search the web to find current information. Use this when the user asks about current events, facts, or anything that requires up-to-date information.",
+        description: "Search the web and fetch URLs",
+        version: "1.1.0",
+        instructions: "You can search the web and fetch URLs. web_search queries Hacker News for stories. web_fetch retrieves any URL (APIs, pages). Use web_fetch for specific APIs like https://hacker-news.firebaseio.com/v0/topstories.json or any public endpoint. For HackerNews top stories, prefer fetching the API directly.",
         tools: [
-          { name: "web_search", description: "Search the web", parameters: [
+          { name: "web_search", description: "Search Hacker News stories by keyword", parameters: [
             { name: "query", type: "string", description: "Search query", required: true },
+          ]},
+          { name: "web_fetch", description: "Fetch a URL and return its contents (JSON APIs, web pages, etc.)", parameters: [
+            { name: "url", type: "string", description: "URL to fetch", required: true },
           ]},
         ],
         enabled: true,
@@ -407,8 +410,12 @@ export class FileStorage {
     ];
 
     for (const b of builtins) {
-      if (!skills.find(s => s.name === b.name)) {
+      const existing = skills.findIndex(s => s.name === b.name);
+      if (existing === -1) {
         skills.push(b);
+      } else if (skills[existing].builtin && skills[existing].version !== b.version) {
+        // Update built-in skills when version changes
+        skills[existing] = b;
       }
     }
     writeJson(this.skillsPath(), skills);
