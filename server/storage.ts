@@ -159,6 +159,25 @@ export class FileStorage {
     return fs.readFileSync(filePath);
   }
 
+  // ============ CHAT ASSETS (images pasted into chat) ============
+  saveChatAsset(filename: string, buffer: Buffer): string {
+    const assetsDir = path.join(this.dataDir, "chat", "assets");
+    ensureDir(assetsDir);
+    const filePath = path.join(assetsDir, filename);
+    fs.writeFileSync(filePath, buffer);
+    return `/api/chat/assets/${filename}`;
+  }
+
+  getChatAsset(filename: string): Buffer | null {
+    const filePath = path.join(this.dataDir, "chat", "assets", filename);
+    if (!fs.existsSync(filePath)) return null;
+    return fs.readFileSync(filePath);
+  }
+
+  getChatAssetPath(filename: string): string {
+    return path.join(this.dataDir, "chat", "assets", filename);
+  }
+
   // ============ TASKS ============
   private tasksPath() { return path.join(this.dataDir, "tasks", "tasks.json"); }
 

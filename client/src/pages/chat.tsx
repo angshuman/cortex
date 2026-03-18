@@ -18,8 +18,12 @@ import {
   ChevronDown,
   ChevronRight,
   Plus,
+  Image as ImageIcon,
+  X,
+  Paperclip,
 } from "lucide-react";
 import { marked } from "marked";
+import { useImagePaste } from "@/hooks/use-image-paste";
 
 interface ChatEvent {
   id: string;
@@ -40,7 +44,13 @@ export default function ChatPage() {
   const wsRef = useRef<WebSocket | null>(null);
   const scrollRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLTextAreaElement>(null);
+  const fileInputRef = useRef<HTMLInputElement>(null);
   const queryClient = useQueryClient();
+  const {
+    pendingImages, uploadedImages, hasImages, allUploaded, isUploading,
+    addImage, removeImage, clearImages, handlePaste, handleDrop, handleDragOver,
+  } = useImagePaste();
+  const [isDragging, setIsDragging] = useState(false);
 
   // Load existing session
   const { data: session } = useQuery({
@@ -97,8 +107,14 @@ export default function ChatPage() {
 
   const handleSend = useCallback(async () => {
     const msg = input.trim();
-    if (!msg || status === "thinking") return;
+    const images = uploadedImages.length > 0 ? uploadedImages : undefined;
+    if ((!msg && !images) || status === "thinking") return;
+    if (isUploading) return; // Wait for uploads to finish
     setInput("");
+    clearImages();
+
+    const payload: any = { type: "chat", message: msg };
+    if (images) payload.images = images;
 
     let targetSessionId = sessionId;
     if (!targetSessionId) {
@@ -111,7 +127,7 @@ export default function ChatPage() {
         setTimeout(() => {
           const ws = wsRef.current;
           if (ws && ws.readyState === WebSocket.OPEN) {
-            ws.send(JSON.stringify({ type: "chat", sessionId: targetSessionId, message: msg }));
+            ws.send(JSON.stringify({ ...payload, sessionId: targetSessionId }));
           }
         }, 500);
         return;
@@ -121,9 +137,9 @@ export default function ChatPage() {
     const ws = wsRef.current;
     if (ws && ws.readyState === WebSocket.OPEN) {
       setStatus("thinking");
-      ws.send(JSON.stringify({ type: "chat", sessionId: targetSessionId, message: msg }));
+      ws.send(JSON.stringify({ ...payload, sessionId: targetSessionId }));
     }
-  }, [input, sessionId, status, setLocation]);
+  }, [input, sessionId, status, setLocation, uploadedImages, isUploading, clearImages]);
 
   const handleKeyDown = (e: React.KeyboardEvent) => {
     if (e.key === "Enter" && !e.shiftKey) {
@@ -157,10 +173,26 @@ export default function ChatPage() {
     switch (event.type) {
       case "message":
         if (isUser) {
+          const userImages: string[] = event.metadata?.images || [];
+          // Separate text from image markdown
+          const textContent = event.content.replace(/!\[image\]\([^)]+\)\n?/g, "").trim();
           return (
             <div key={event.id || idx} className="flex justify-end mb-4">
               <div className="max-w-[80%] bg-primary text-primary-foreground rounded-2xl rounded-br-md px-4 py-2.5">
-                <p className="text-sm whitespace-pre-wrap">{event.content}</p>
+                {userImages.length > 0 && (
+                  <div className="flex flex-wrap gap-1.5 mb-1.5">
+                    {userImages.map((url, i) => (
+                      <img
+                        key={i}
+                        src={url}
+                        alt="pasted"
+                        className="max-w-[200px] max-h-[150px] rounded-lg object-cover"
+                        data-testid={`img-user-${idx}-${i}`}
+                      />
+                    ))}
+                  </div>
+                )}
+                {textContent && <p className="text-sm whitespace-pre-wrap">{textContent}</p>}
               </div>
             </div>
           );
@@ -335,15 +367,69 @@ export default function ChatPage() {
       </div>
 
       {/* Input */}
-      <div className="border-t border-border/50 bg-background px-4 py-3 shrink-0">
+      <div
+        className={`border-t border-border/50 bg-background px-4 py-3 shrink-0 transition-colors ${isDragging ? "bg-primary/5 border-primary/30" : ""}`}
+        onDrop={(e) => { handleDrop(e); setIsDragging(false); }}
+        onDragOver={(e) => { handleDragOver(e); setIsDragging(true); }}
+        onDragLeave={() => setIsDragging(false)}
+      >
         <div className="max-w-3xl mx-auto">
+          {/* Image previews */}
+          {pendingImages.length > 0 && (
+            <div className="flex flex-wrap gap-2 mb-2">
+              {pendingImages.map(img => (
+                <div key={img.id} className="relative group">
+                  <img
+                    src={img.preview}
+                    alt="preview"
+                    className={`h-16 w-16 rounded-lg object-cover border border-border/50 ${img.uploading ? "opacity-50" : ""} ${img.error ? "border-destructive" : ""}`}
+                  />
+                  {img.uploading && (
+                    <div className="absolute inset-0 flex items-center justify-center">
+                      <Loader2 className="w-4 h-4 animate-spin text-primary" />
+                    </div>
+                  )}
+                  <button
+                    onClick={() => removeImage(img.id)}
+                    className="absolute -top-1.5 -right-1.5 w-4 h-4 bg-destructive text-destructive-foreground rounded-full flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity"
+                    data-testid={`button-remove-image-${img.id}`}
+                  >
+                    <X className="w-2.5 h-2.5" />
+                  </button>
+                </div>
+              ))}
+            </div>
+          )}
           <div className="relative flex items-end gap-2 bg-muted/50 rounded-xl border border-border/50 p-2 focus-within:border-primary/50 transition-colors">
+            <input
+              ref={fileInputRef}
+              type="file"
+              accept="image/*"
+              multiple
+              className="hidden"
+              onChange={(e) => {
+                const files = e.target.files;
+                if (files) Array.from(files).forEach(f => addImage(f));
+                e.target.value = "";
+              }}
+            />
+            <Button
+              variant="ghost"
+              size="icon"
+              className="shrink-0 h-8 w-8 rounded-lg text-muted-foreground hover:text-foreground"
+              onClick={() => fileInputRef.current?.click()}
+              data-testid="button-attach-image"
+              title="Attach image"
+            >
+              <Paperclip className="w-3.5 h-3.5" />
+            </Button>
             <Textarea
               ref={inputRef}
               value={input}
               onChange={(e) => setInput(e.target.value)}
               onKeyDown={handleKeyDown}
-              placeholder="Ask anything..."
+              onPaste={handlePaste}
+              placeholder={isDragging ? "Drop image here..." : "Ask anything... (paste or drop images)"}
               className="min-h-[40px] max-h-[160px] resize-none border-0 bg-transparent focus-visible:ring-0 focus-visible:ring-offset-0 text-sm p-1"
               rows={1}
               data-testid="input-chat"
@@ -352,14 +438,14 @@ export default function ChatPage() {
               size="icon"
               className="shrink-0 h-8 w-8 rounded-lg"
               onClick={handleSend}
-              disabled={!input.trim() || status === "thinking"}
+              disabled={(!input.trim() && !hasImages) || status === "thinking" || isUploading}
               data-testid="button-send"
             >
               <Send className="w-3.5 h-3.5" />
             </Button>
           </div>
           <p className="text-[10px] text-muted-foreground/50 mt-1.5 text-center">
-            Cortex can make mistakes. Verify important information.
+            Cortex can make mistakes. Paste or drop images to analyze them.
           </p>
         </div>
       </div>

@@ -1,14 +1,28 @@
 import Anthropic from "@anthropic-ai/sdk";
 import OpenAI from "openai";
+import fs from "fs";
 import { v4 as uuid } from "uuid";
 import { storage } from "./storage";
 import type { ChatEvent, Skill } from "@shared/schema";
 
 type EventCallback = (event: ChatEvent) => void;
 
+interface ImageBlock {
+  type: "image";
+  url: string;         // local URL like /api/chat/assets/xxx.png
+  mediaType: string;   // e.g. image/png
+}
+
+interface TextBlock {
+  type: "text";
+  text: string;
+}
+
+type ContentBlock = TextBlock | ImageBlock;
+
 interface AgentMessage {
   role: "user" | "assistant" | "system";
-  content: string;
+  content: string | ContentBlock[];
 }
 
 interface ToolDef {
@@ -169,6 +183,92 @@ async function executeTool(name: string, args: Record<string, any>): Promise<str
   }
 }
 
+function imageUrlToBase64(url: string): { base64: string; mediaType: string } | null {
+  try {
+    // url is like /api/chat/assets/xxx.png — extract filename
+    const match = url.match(/\/api\/chat\/assets\/(.+)$/);
+    if (!match) {
+      // Also support note assets: /api/notes/:id/assets/:filename
+      const noteMatch = url.match(/\/api\/notes\/([^/]+)\/assets\/(.+)$/);
+      if (noteMatch) {
+        const buf = storage.getNoteAsset(noteMatch[1], noteMatch[2]);
+        if (!buf) return null;
+        const ext = noteMatch[2].split(".").pop()?.toLowerCase() || "png";
+        const mimeMap: Record<string, string> = {
+          png: "image/png", jpg: "image/jpeg", jpeg: "image/jpeg",
+          gif: "image/gif", webp: "image/webp", svg: "image/svg+xml", bmp: "image/bmp",
+        };
+        return { base64: buf.toString("base64"), mediaType: mimeMap[ext] || "image/png" };
+      }
+      return null;
+    }
+    const filename = match[1];
+    const buf = storage.getChatAsset(filename);
+    if (!buf) return null;
+    const ext = filename.split(".").pop()?.toLowerCase() || "png";
+    const mimeMap: Record<string, string> = {
+      png: "image/png", jpg: "image/jpeg", jpeg: "image/jpeg",
+      gif: "image/gif", webp: "image/webp", svg: "image/svg+xml", bmp: "image/bmp",
+    };
+    return { base64: buf.toString("base64"), mediaType: mimeMap[ext] || "image/png" };
+  } catch {
+    return null;
+  }
+}
+
+function messagesToClaude(messages: AgentMessage[]): any[] {
+  return messages
+    .filter(m => m.role !== "system")
+    .map(m => {
+      if (typeof m.content === "string") {
+        return { role: m.role as "user" | "assistant", content: m.content };
+      }
+      // Convert content blocks
+      const parts: any[] = [];
+      for (const block of m.content) {
+        if (block.type === "text") {
+          parts.push({ type: "text", text: block.text });
+        } else if (block.type === "image") {
+          const data = imageUrlToBase64(block.url);
+          if (data) {
+            parts.push({
+              type: "image",
+              source: { type: "base64", media_type: data.mediaType, data: data.base64 },
+            });
+          }
+        }
+      }
+      return { role: m.role as "user" | "assistant", content: parts.length > 0 ? parts : "" };
+    });
+}
+
+function messagesToOpenAI(messages: AgentMessage[], systemPrompt: string): any[] {
+  const result: any[] = [{ role: "system", content: systemPrompt }];
+  for (const m of messages) {
+    if (typeof m.content === "string") {
+      result.push({ role: m.role, content: m.content });
+    } else {
+      // Convert content blocks to OpenAI format
+      const parts: any[] = [];
+      for (const block of m.content) {
+        if (block.type === "text") {
+          parts.push({ type: "text", text: block.text });
+        } else if (block.type === "image") {
+          const data = imageUrlToBase64(block.url);
+          if (data) {
+            parts.push({
+              type: "image_url",
+              image_url: { url: `data:${data.mediaType};base64,${data.base64}` },
+            });
+          }
+        }
+      }
+      result.push({ role: m.role, content: parts.length > 0 ? parts : "" });
+    }
+  }
+  return result;
+}
+
 function buildSystemPrompt(): string {
   const skills = storage.getSkills().filter((s: Skill) => s.enabled);
   const skillInstructions = skills.map((s: Skill) => s.instructions).filter(Boolean).join("\n\n");
@@ -189,6 +289,19 @@ function buildSystemPrompt(): string {
 - Browse the web using browser tools (when MCP is configured)
 - Search across all notes, tasks, and conversations
 - Plan and reason through complex problems step by step
+- **Vision**: You can see and analyze images pasted into chat
+
+## Image Handling
+When a user sends images:
+- You can see the image content. Describe what you observe.
+- If the user asks you to do something with the image (save to note, extract info, create tasks), do it using your tools.
+- If the user sends ONLY an image with no text, automatically:
+  1. Analyze the image thoroughly (describe content, extract any text/data, identify key info)
+  2. Create a note with a descriptive title summarizing the image content
+  3. Include the image in the note markdown as \`![description](image_url)\`
+  4. Add metadata tags (e.g. screenshot, diagram, photo, receipt, code, whiteboard, document)
+  5. Put it in /inbox folder
+- When creating notes from images, always include the original image URL in the markdown content so the image is visible in the note.
 
 ## Current Context
 ${taskSummary}
@@ -239,9 +352,30 @@ export class Agent {
     storage.addChatEvent(this.sessionId, event);
   }
 
-  async run(userMessage: string): Promise<void> {
-    this.emit("message", userMessage, { role: "user" });
-    this.messages.push({ role: "user", content: userMessage });
+  async run(userMessage: string, images?: Array<{ url: string; mediaType: string }>): Promise<void> {
+    // Build display text (shown in UI)
+    const displayParts: string[] = [];
+    if (images && images.length > 0) {
+      for (const img of images) {
+        displayParts.push(`![image](${img.url})`);
+      }
+    }
+    if (userMessage) displayParts.push(userMessage);
+    this.emit("message", displayParts.join("\n"), { role: "user", images: images?.map(i => i.url) });
+
+    // Build the actual content blocks for the LLM
+    const contentBlocks: ContentBlock[] = [];
+    if (images && images.length > 0) {
+      for (const img of images) {
+        contentBlocks.push({ type: "image", url: img.url, mediaType: img.mediaType });
+      }
+    }
+
+    // If user sent only image(s) with no text, inject auto-analysis instruction
+    const effectiveMessage = userMessage || "The user pasted this image without any text. Analyze the image thoroughly: describe what you see, extract any text/data, identify key information, and then automatically save it as a note with a descriptive title. Include the image in the note content. Add relevant tags based on the content (e.g. screenshot, diagram, photo, receipt, code, whiteboard, etc). Put it in the /inbox folder.";
+    contentBlocks.push({ type: "text", text: effectiveMessage });
+
+    this.messages.push({ role: "user", content: contentBlocks });
 
     const { provider, model } = detectProvider();
     if (provider === "none") {
@@ -286,7 +420,7 @@ export class Agent {
     let step = 0;
     while (step < this.maxSteps) {
       step++;
-      const msgs = this.messages.map(m => ({ role: m.role as "user" | "assistant", content: m.content }));
+      const msgs = messagesToClaude(this.messages);
       this.emit("thought", `Reasoning... (step ${step}/${this.maxSteps})`);
 
       const response = await client.messages.create({
@@ -338,10 +472,7 @@ export class Agent {
     }));
 
     let step = 0;
-    const openaiMessages: any[] = [
-      { role: "system", content: systemPrompt },
-      ...this.messages.map(m => ({ role: m.role, content: m.content })),
-    ];
+    const openaiMessages: any[] = messagesToOpenAI(this.messages, systemPrompt);
 
     while (step < this.maxSteps) {
       step++;

@@ -129,6 +129,28 @@ export function registerRoutes(server: Server, app: Express) {
     res.json({ success: true });
   });
 
+  // ============ CHAT ASSETS (pasted images) ============
+  app.post("/api/chat/assets", upload.single("file"), (req: any, res: any) => {
+    if (!req.file) return res.status(400).json({ error: "No file" });
+    const ext = path.extname(req.file.originalname).toLowerCase() || ".png";
+    const filename = `${Date.now()}-${Math.random().toString(36).slice(2, 8)}${ext}`;
+    const url = storage.saveChatAsset(filename, req.file.buffer);
+    res.json({ url, filename });
+  });
+
+  app.get("/api/chat/assets/:filename", (req, res) => {
+    const buffer = storage.getChatAsset(req.params.filename as string);
+    if (!buffer) return res.status(404).end();
+    const ext = path.extname(req.params.filename as string).toLowerCase();
+    const mimeMap: Record<string, string> = {
+      ".png": "image/png", ".jpg": "image/jpeg", ".jpeg": "image/jpeg",
+      ".gif": "image/gif", ".webp": "image/webp", ".svg": "image/svg+xml",
+      ".bmp": "image/bmp",
+    };
+    res.setHeader("Content-Type", mimeMap[ext] || "application/octet-stream");
+    res.send(buffer);
+  });
+
   // ============ SKILLS ============
   app.get("/api/skills", (_req, res) => {
     res.json(storage.getSkills());
@@ -190,7 +212,7 @@ export function registerRoutes(server: Server, app: Express) {
           }
         }
 
-        if (data.type === "chat" && data.sessionId && data.message) {
+        if (data.type === "chat" && data.sessionId && (data.message || data.images)) {
           const sessionId = data.sessionId;
           currentSessionId = sessionId;
 
@@ -218,8 +240,11 @@ export function registerRoutes(server: Server, app: Express) {
 
           broadcast({ type: "status", content: "thinking" });
 
+          // Pass images array if present
+          const images: Array<{ url: string; mediaType: string }> | undefined = data.images;
+
           try {
-            await agent.run(data.message);
+            await agent.run(data.message || "", images);
             broadcast({ type: "status", content: "done" });
           } catch (err: any) {
             broadcast({ type: "error", content: err.message });
