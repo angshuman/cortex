@@ -1,5 +1,23 @@
 import { z } from "zod";
 
+// ============ VAULTS ============
+export const vaultSchema = z.object({
+  id: z.string(),
+  name: z.string(),
+  slug: z.string(),
+  icon: z.string().default("📁"),
+  color: z.string().default("#6366f1"),
+  createdAt: z.string(),
+  updatedAt: z.string(),
+});
+export type Vault = z.infer<typeof vaultSchema>;
+export const insertVaultSchema = z.object({
+  name: z.string(),
+  icon: z.string().optional(),
+  color: z.string().optional(),
+});
+export type InsertVault = z.infer<typeof insertVaultSchema>;
+
 // ============ NOTES ============
 export const noteSchema = z.object({
   id: z.string(),

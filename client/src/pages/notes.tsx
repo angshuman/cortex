@@ -1,6 +1,7 @@
 import { useState, useCallback, useRef } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
-import { apiRequest } from "@/lib/queryClient";
+import { apiRequest, withVault } from "@/lib/queryClient";
+import { useVault } from "@/hooks/use-vault";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
@@ -69,23 +70,26 @@ export default function NotesPage() {
   const dumpFileRef = useRef<HTMLInputElement>(null);
   const queryClient = useQueryClient();
   const { toast } = useToast();
+  const { vaultParam, vaultId } = useVault();
 
   const { data: notes = [] } = useQuery<Note[]>({
-    queryKey: ["/api/notes"],
-    queryFn: () => apiRequest("GET", "/api/notes").then(r => r.json()),
+    queryKey: ["/api/notes", vaultId],
+    queryFn: () => apiRequest("GET", withVault("/api/notes", vaultParam)).then(r => r.json()),
     staleTime: 0,
     refetchOnMount: "always",
+    enabled: !!vaultId,
   });
 
   const { data: folders = [] } = useQuery<string[]>({
-    queryKey: ["/api/notes/folders"],
-    queryFn: () => apiRequest("GET", "/api/notes/folders").then(r => r.json()),
+    queryKey: ["/api/notes/folders", vaultId],
+    queryFn: () => apiRequest("GET", withVault("/api/notes/folders", vaultParam)).then(r => r.json()),
     staleTime: 0,
     refetchOnMount: "always",
+    enabled: !!vaultId,
   });
 
   const createNote = useMutation({
-    mutationFn: (data: any) => apiRequest("POST", "/api/notes", data).then(r => r.json()),
+    mutationFn: (data: any) => apiRequest("POST", withVault("/api/notes", vaultParam), data).then(r => r.json()),
     onSuccess: (note) => {
       queryClient.invalidateQueries({ queryKey: ["/api/notes"] });
       queryClient.invalidateQueries({ queryKey: ["/api/notes/folders"] });
@@ -99,7 +103,7 @@ export default function NotesPage() {
   });
 
   const updateNote = useMutation({
-    mutationFn: ({ id, ...data }: any) => apiRequest("PATCH", `/api/notes/${id}`, data).then(r => r.json()),
+    mutationFn: ({ id, ...data }: any) => apiRequest("PATCH", withVault(`/api/notes/${id}`, vaultParam), data).then(r => r.json()),
     onSuccess: (note) => {
       queryClient.invalidateQueries({ queryKey: ["/api/notes"] });
       setSelectedNote(note);
@@ -108,7 +112,7 @@ export default function NotesPage() {
   });
 
   const deleteNote = useMutation({
-    mutationFn: (id: string) => apiRequest("DELETE", `/api/notes/${id}`),
+    mutationFn: (id: string) => apiRequest("DELETE", withVault(`/api/notes/${id}`, vaultParam)),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["/api/notes"] });
       queryClient.invalidateQueries({ queryKey: ["/api/notes/folders"] });
@@ -128,7 +132,7 @@ export default function NotesPage() {
     const formData = new FormData();
     formData.append("file", file);
     try {
-      const res = await fetch(`/api/notes/${selectedNote.id}/assets`, { method: "POST", body: formData });
+      const res = await fetch(withVault(`/api/notes/${selectedNote.id}/assets`, vaultParam), { method: "POST", body: formData });
       const data = await res.json();
       const imgMd = `\n![${file.name}](${data.url})\n`;
       setEditContent(prev => prev + imgMd);
@@ -155,7 +159,7 @@ export default function NotesPage() {
     if (text) formData.append("content", text);
     if (file) formData.append("file", file);
     try {
-      await fetch("/api/notes/inbox/dump", { method: "POST", body: formData });
+      await fetch(withVault("/api/notes/inbox/dump", vaultParam), { method: "POST", body: formData });
       queryClient.invalidateQueries({ queryKey: ["/api/notes"] });
       toast({ title: "Dumped to inbox" });
     } catch {}

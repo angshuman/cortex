@@ -1,7 +1,7 @@
 import fs from "fs";
 import path from "path";
 import { v4 as uuid } from "uuid";
-import type { Note, InsertNote, Task, InsertTask, ChatSession, ChatEvent, Skill, Config, SearchResult } from "@shared/schema";
+import type { Note, InsertNote, Task, InsertTask, ChatSession, ChatEvent, Skill, Config, SearchResult, Vault, InsertVault } from "@shared/schema";
 
 const DEFAULT_DATA_DIR = path.join(process.cwd(), ".cortex-data");
 
@@ -21,15 +21,26 @@ function writeJson(filePath: string, data: any) {
   fs.writeFileSync(filePath, JSON.stringify(data, null, 2), "utf-8");
 }
 
+function slugify(name: string): string {
+  return name
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, "-")
+    .replace(/^-|-$/g, "") || "vault";
+}
+
+/**
+ * FileStorage: operates within a single vault directory.
+ * All notes, tasks, chat, skills are scoped to this directory.
+ */
 export class FileStorage {
   private dataDir: string;
 
-  constructor(dataDir?: string) {
-    this.dataDir = dataDir || process.env.CORTEX_DATA_DIR || DEFAULT_DATA_DIR;
-    this.init();
+  constructor(dataDir: string) {
+    this.dataDir = dataDir;
+    this.initVaultDirs();
   }
 
-  private init() {
+  private initVaultDirs() {
     ensureDir(this.dataDir);
     ensureDir(path.join(this.dataDir, "notes"));
     ensureDir(path.join(this.dataDir, "notes", "inbox"));
@@ -42,38 +53,10 @@ export class FileStorage {
     // Initialize default files if not present
     const tasksFile = path.join(this.dataDir, "tasks", "tasks.json");
     if (!fs.existsSync(tasksFile)) writeJson(tasksFile, []);
-    const configFile = path.join(this.dataDir, "config.json");
-    if (!fs.existsSync(configFile)) writeJson(configFile, {
-      dataDir: this.dataDir,
-      aiProvider: this.detectProvider(),
-      vectorSearch: "local",
-      browserBackend: "none",
-      mcpServers: {},
-      theme: "system",
-    });
     this.initBuiltinSkills();
   }
 
   getDataDir(): string { return this.dataDir; }
-
-  private detectProvider(): string {
-    if (process.env.ANTHROPIC_API_KEY && process.env.ANTHROPIC_API_KEY.startsWith("sk-ant")) return "claude";
-    if (process.env.OPENAI_API_KEY && process.env.OPENAI_API_KEY.startsWith("sk-")) return "openai";
-    if (process.env.GROK_API_KEY) return "grok";
-    return "claude";
-  }
-
-  // ============ CONFIG ============
-  getConfig(): Config {
-    return readJson(path.join(this.dataDir, "config.json"), {} as Config);
-  }
-
-  saveConfig(config: Partial<Config>): Config {
-    const existing = this.getConfig();
-    const merged = { ...existing, ...config };
-    writeJson(path.join(this.dataDir, "config.json"), merged);
-    return merged;
-  }
 
   // ============ NOTES ============
   private notesIndexPath() { return path.join(this.dataDir, "notes", "index.json"); }
@@ -150,6 +133,7 @@ export class FileStorage {
     ensureDir(assetsDir);
     const filePath = path.join(assetsDir, filename);
     fs.writeFileSync(filePath, buffer);
+    // URL includes vault prefix — will be handled by routes
     return `/api/notes/${noteId}/assets/${filename}`;
   }
 
@@ -433,7 +417,6 @@ export class FileStorage {
       if (existing === -1) {
         skills.push(b);
       } else if (skills[existing].builtin && skills[existing].version !== b.version) {
-        // Update built-in skills when version changes
         skills[existing] = b;
       }
     }
@@ -445,7 +428,6 @@ export class FileStorage {
     const results: SearchResult[] = [];
     const q = query.toLowerCase();
 
-    // Search notes
     for (const note of this.getNotes()) {
       const titleMatch = note.title.toLowerCase().includes(q);
       const contentMatch = note.content.toLowerCase().includes(q);
@@ -470,7 +452,6 @@ export class FileStorage {
       }
     }
 
-    // Search tasks
     for (const task of this.getTasks()) {
       const titleMatch = task.title.toLowerCase().includes(q);
       const descMatch = task.description.toLowerCase().includes(q);
@@ -485,8 +466,7 @@ export class FileStorage {
       }
     }
 
-    // Search chat sessions
-    for (const sess of this.getSessionsIndex()) {
+    for (const sess of this.getSessions()) {
       if (sess.title.toLowerCase().includes(q)) {
         results.push({
           id: sess.id,
@@ -502,4 +482,272 @@ export class FileStorage {
   }
 }
 
-export const storage = new FileStorage();
+/**
+ * VaultManager: top-level manager that handles vault CRUD
+ * and provides per-vault FileStorage instances.
+ * 
+ * Filesystem layout:
+ *   .cortex-data/
+ *     config.json          (global config)
+ *     vaults.json          (vault registry)
+ *     vaults/
+ *       default/           (each vault is a folder)
+ *         notes/
+ *         tasks/
+ *         chat/
+ *         skills/
+ *         search/
+ *       work/
+ *         ...
+ */
+export class VaultManager {
+  private rootDir: string;
+  private vaultsDir: string;
+  private storageCache = new Map<string, FileStorage>();
+
+  constructor(rootDir?: string) {
+    this.rootDir = rootDir || process.env.CORTEX_DATA_DIR || DEFAULT_DATA_DIR;
+    this.vaultsDir = path.join(this.rootDir, "vaults");
+    ensureDir(this.rootDir);
+    ensureDir(this.vaultsDir);
+    this.migrate();
+  }
+
+  getRootDir(): string { return this.rootDir; }
+
+  // ============ VAULT CRUD ============
+  private vaultsIndexPath() { return path.join(this.rootDir, "vaults.json"); }
+
+  private getVaultsIndex(): Vault[] {
+    return readJson(this.vaultsIndexPath(), []);
+  }
+
+  private saveVaultsIndex(vaults: Vault[]) {
+    writeJson(this.vaultsIndexPath(), vaults);
+  }
+
+  getVaults(): Vault[] {
+    return this.getVaultsIndex().sort((a, b) => a.name.localeCompare(b.name));
+  }
+
+  getVault(id: string): Vault | undefined {
+    return this.getVaultsIndex().find(v => v.id === id);
+  }
+
+  getVaultBySlug(slug: string): Vault | undefined {
+    return this.getVaultsIndex().find(v => v.slug === slug);
+  }
+
+  createVault(input: InsertVault): Vault {
+    const now = new Date().toISOString();
+    let slug = slugify(input.name);
+    // Ensure unique slug
+    const existing = this.getVaultsIndex();
+    let suffix = 0;
+    let candidateSlug = slug;
+    while (existing.some(v => v.slug === candidateSlug)) {
+      suffix++;
+      candidateSlug = `${slug}-${suffix}`;
+    }
+    slug = candidateSlug;
+
+    const vault: Vault = {
+      id: uuid(),
+      name: input.name,
+      slug,
+      icon: input.icon || "\ud83d\udcc1",
+      color: input.color || "#6366f1",
+      createdAt: now,
+      updatedAt: now,
+    };
+
+    existing.push(vault);
+    this.saveVaultsIndex(existing);
+
+    // Create the vault directory and initialize storage
+    const vaultDir = path.join(this.vaultsDir, slug);
+    ensureDir(vaultDir);
+    this.getStorage(vault.id); // triggers init
+
+    return vault;
+  }
+
+  updateVault(id: string, updates: Partial<Pick<Vault, "name" | "icon" | "color">>): Vault | undefined {
+    const vaults = this.getVaultsIndex();
+    const idx = vaults.findIndex(v => v.id === id);
+    if (idx === -1) return undefined;
+
+    const oldSlug = vaults[idx].slug;
+    let newSlug = oldSlug;
+
+    if (updates.name && updates.name !== vaults[idx].name) {
+      newSlug = slugify(updates.name);
+      let suffix = 0;
+      let candidateSlug = newSlug;
+      while (vaults.some(v => v.slug === candidateSlug && v.id !== id)) {
+        suffix++;
+        candidateSlug = `${newSlug}-${suffix}`;
+      }
+      newSlug = candidateSlug;
+
+      // Rename folder on disk
+      const oldDir = path.join(this.vaultsDir, oldSlug);
+      const newDir = path.join(this.vaultsDir, newSlug);
+      if (fs.existsSync(oldDir) && oldDir !== newDir) {
+        fs.renameSync(oldDir, newDir);
+      }
+
+      // Clear cached storage for old slug
+      this.storageCache.delete(id);
+    }
+
+    vaults[idx] = {
+      ...vaults[idx],
+      ...updates,
+      slug: newSlug,
+      updatedAt: new Date().toISOString(),
+    };
+    this.saveVaultsIndex(vaults);
+    return vaults[idx];
+  }
+
+  deleteVault(id: string): boolean {
+    const vaults = this.getVaultsIndex();
+    const vault = vaults.find(v => v.id === id);
+    if (!vault) return false;
+    if (vaults.length <= 1) return false; // Can't delete last vault
+
+    const filtered = vaults.filter(v => v.id !== id);
+    this.saveVaultsIndex(filtered);
+    this.storageCache.delete(id);
+
+    // Optionally: we keep the folder on disk for safety (user can manually delete)
+    // To truly delete: fs.rmSync(path.join(this.vaultsDir, vault.slug), { recursive: true, force: true });
+    return true;
+  }
+
+  // ============ STORAGE ACCESS ============
+  getStorage(vaultId: string): FileStorage {
+    if (this.storageCache.has(vaultId)) {
+      return this.storageCache.get(vaultId)!;
+    }
+
+    const vault = this.getVault(vaultId);
+    if (!vault) {
+      // Fallback to first vault
+      const vaults = this.getVaults();
+      if (vaults.length > 0) {
+        return this.getStorage(vaults[0].id);
+      }
+      throw new Error("No vaults exist");
+    }
+
+    const vaultDir = path.join(this.vaultsDir, vault.slug);
+    const storage = new FileStorage(vaultDir);
+    this.storageCache.set(vaultId, storage);
+    return storage;
+  }
+
+  getDefaultVault(): Vault {
+    const vaults = this.getVaults();
+    return vaults[0]; // First vault is the default
+  }
+
+  // ============ CONFIG (global, not per-vault) ============
+  private detectProvider(): string {
+    if (process.env.ANTHROPIC_API_KEY && process.env.ANTHROPIC_API_KEY.startsWith("sk-ant")) return "claude";
+    if (process.env.OPENAI_API_KEY && process.env.OPENAI_API_KEY.startsWith("sk-")) return "openai";
+    if (process.env.GROK_API_KEY) return "grok";
+    return "claude";
+  }
+
+  getConfig(): Config {
+    const configPath = path.join(this.rootDir, "config.json");
+    if (!fs.existsSync(configPath)) {
+      const config = {
+        dataDir: this.rootDir,
+        aiProvider: this.detectProvider(),
+        vectorSearch: "local" as const,
+        browserBackend: "none" as const,
+        mcpServers: {},
+        theme: "system" as const,
+      };
+      writeJson(configPath, config);
+      return config as Config;
+    }
+    return readJson(configPath, {} as Config);
+  }
+
+  saveConfig(config: Partial<Config>): Config {
+    const existing = this.getConfig();
+    const merged = { ...existing, ...config };
+    writeJson(path.join(this.rootDir, "config.json"), merged);
+    return merged;
+  }
+
+  // ============ MIGRATION ============
+  /** Migrate from flat .cortex-data to vault structure */
+  private migrate() {
+    const vaults = this.getVaultsIndex();
+    if (vaults.length > 0) return; // Already migrated
+
+    // Check if old flat data exists
+    const oldNotesIndex = path.join(this.rootDir, "notes", "index.json");
+    const oldTasksFile = path.join(this.rootDir, "tasks", "tasks.json");
+    const oldChatDir = path.join(this.rootDir, "chat", "sessions");
+    const hasOldData = fs.existsSync(oldNotesIndex) || fs.existsSync(oldTasksFile) || fs.existsSync(oldChatDir);
+
+    // Create default vault
+    const now = new Date().toISOString();
+    const defaultVault: Vault = {
+      id: uuid(),
+      name: "Personal",
+      slug: "personal",
+      icon: "\ud83c\udfe0",
+      color: "#6366f1",
+      createdAt: now,
+      updatedAt: now,
+    };
+    this.saveVaultsIndex([defaultVault]);
+
+    const vaultDir = path.join(this.vaultsDir, defaultVault.slug);
+    ensureDir(vaultDir);
+
+    if (hasOldData) {
+      // Move old data into the default vault folder
+      const dirsToMove = ["notes", "tasks", "chat", "skills", "search"];
+      for (const dir of dirsToMove) {
+        const oldDir = path.join(this.rootDir, dir);
+        const newDir = path.join(vaultDir, dir);
+        if (fs.existsSync(oldDir) && !fs.existsSync(newDir)) {
+          // Copy recursively (we don't delete old files for safety)
+          copyDirRecursive(oldDir, newDir);
+        }
+      }
+    }
+
+    // Initialize the vault storage (creates dirs/defaults if needed)
+    this.getStorage(defaultVault.id);
+  }
+}
+
+function copyDirRecursive(src: string, dest: string) {
+  ensureDir(dest);
+  const entries = fs.readdirSync(src, { withFileTypes: true });
+  for (const entry of entries) {
+    const srcPath = path.join(src, entry.name);
+    const destPath = path.join(dest, entry.name);
+    if (entry.isDirectory()) {
+      copyDirRecursive(srcPath, destPath);
+    } else {
+      fs.copyFileSync(srcPath, destPath);
+    }
+  }
+}
+
+// Global singleton
+export const vaultManager = new VaultManager();
+
+// Backward-compatible default storage (for agent.ts etc.)
+// This will be replaced by vault-scoped access via routes
+export const storage = vaultManager.getStorage(vaultManager.getDefaultVault().id);

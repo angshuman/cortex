@@ -1,6 +1,7 @@
 import { useState } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
-import { apiRequest } from "@/lib/queryClient";
+import { apiRequest, withVault } from "@/lib/queryClient";
+import { useVault } from "@/hooks/use-vault";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
@@ -80,16 +81,18 @@ export default function TasksPage() {
   const [chatOpen, setChatOpen] = useState(false);
   const queryClient = useQueryClient();
   const { toast } = useToast();
+  const { vaultParam, vaultId } = useVault();
 
   const { data: tasks = [] } = useQuery<Task[]>({
-    queryKey: ["/api/tasks"],
-    queryFn: () => apiRequest("GET", "/api/tasks").then(r => r.json()),
-    staleTime: 0,             // Always consider stale so navigation triggers refetch
-    refetchOnMount: "always", // Refetch every time we navigate to this page
+    queryKey: ["/api/tasks", vaultId],
+    queryFn: () => apiRequest("GET", withVault("/api/tasks", vaultParam)).then(r => r.json()),
+    staleTime: 0,
+    refetchOnMount: "always",
+    enabled: !!vaultId,
   });
 
   const createTask = useMutation({
-    mutationFn: (data: any) => apiRequest("POST", "/api/tasks", data).then(r => r.json()),
+    mutationFn: (data: any) => apiRequest("POST", withVault("/api/tasks", vaultParam), data).then(r => r.json()),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["/api/tasks"] });
       setShowNewTask(false);
@@ -103,14 +106,14 @@ export default function TasksPage() {
   });
 
   const updateTask = useMutation({
-    mutationFn: ({ id, ...data }: any) => apiRequest("PATCH", `/api/tasks/${id}`, data).then(r => r.json()),
+    mutationFn: ({ id, ...data }: any) => apiRequest("PATCH", withVault(`/api/tasks/${id}`, vaultParam), data).then(r => r.json()),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["/api/tasks"] });
     },
   });
 
   const deleteTask = useMutation({
-    mutationFn: (id: string) => apiRequest("DELETE", `/api/tasks/${id}`),
+    mutationFn: (id: string) => apiRequest("DELETE", withVault(`/api/tasks/${id}`, vaultParam)),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["/api/tasks"] });
       setEditingTask(null);

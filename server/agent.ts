@@ -2,7 +2,7 @@ import Anthropic from "@anthropic-ai/sdk";
 import OpenAI from "openai";
 import fs from "fs";
 import { v4 as uuid } from "uuid";
-import { storage } from "./storage";
+import { FileStorage } from "./storage";
 import type { ChatEvent, Skill } from "@shared/schema";
 
 type EventCallback = (event: ChatEvent) => void;
@@ -41,7 +41,7 @@ function detectProvider(): { provider: string; model: string } {
   return { provider: "none", model: "none" };
 }
 
-function getToolDefinitions(): ToolDef[] {
+function getToolDefinitions(storage: FileStorage): ToolDef[] {
   const skills = storage.getSkills().filter((s: Skill) => s.enabled);
   const tools: ToolDef[] = [];
   for (const skill of skills) {
@@ -66,7 +66,7 @@ function getToolDefinitions(): ToolDef[] {
   return tools;
 }
 
-async function executeTool(name: string, args: Record<string, any>): Promise<string> {
+async function executeTool(name: string, args: Record<string, any>, storage: FileStorage): Promise<string> {
   try {
     switch (name) {
       case "create_note": {
@@ -183,7 +183,7 @@ async function executeTool(name: string, args: Record<string, any>): Promise<str
   }
 }
 
-function imageUrlToBase64(url: string): { base64: string; mediaType: string } | null {
+function imageUrlToBase64(url: string, storage: FileStorage): { base64: string; mediaType: string } | null {
   try {
     // url is like /api/chat/assets/xxx.png — extract filename
     const match = url.match(/\/api\/chat\/assets\/(.+)$/);
@@ -216,7 +216,7 @@ function imageUrlToBase64(url: string): { base64: string; mediaType: string } | 
   }
 }
 
-function messagesToClaude(messages: AgentMessage[]): any[] {
+function messagesToClaude(messages: AgentMessage[], storage: FileStorage): any[] {
   return messages
     .filter(m => m.role !== "system")
     .map(m => {
@@ -229,7 +229,7 @@ function messagesToClaude(messages: AgentMessage[]): any[] {
         if (block.type === "text") {
           parts.push({ type: "text", text: block.text });
         } else if (block.type === "image") {
-          const data = imageUrlToBase64(block.url);
+          const data = imageUrlToBase64(block.url, storage);
           if (data) {
             parts.push({
               type: "image",
@@ -242,7 +242,7 @@ function messagesToClaude(messages: AgentMessage[]): any[] {
     });
 }
 
-function messagesToOpenAI(messages: AgentMessage[], systemPrompt: string): any[] {
+function messagesToOpenAI(messages: AgentMessage[], systemPrompt: string, storage: FileStorage): any[] {
   const result: any[] = [{ role: "system", content: systemPrompt }];
   for (const m of messages) {
     if (typeof m.content === "string") {
@@ -254,7 +254,7 @@ function messagesToOpenAI(messages: AgentMessage[], systemPrompt: string): any[]
         if (block.type === "text") {
           parts.push({ type: "text", text: block.text });
         } else if (block.type === "image") {
-          const data = imageUrlToBase64(block.url);
+          const data = imageUrlToBase64(block.url, storage);
           if (data) {
             parts.push({
               type: "image_url",
@@ -269,7 +269,7 @@ function messagesToOpenAI(messages: AgentMessage[], systemPrompt: string): any[]
   return result;
 }
 
-function buildSystemPrompt(): string {
+function buildSystemPrompt(storage: FileStorage): string {
   const skills = storage.getSkills().filter((s: Skill) => s.enabled);
   const skillInstructions = skills.map((s: Skill) => s.instructions).filter(Boolean).join("\n\n");
   const notes = storage.getNotes();
@@ -333,11 +333,14 @@ export class Agent {
   private onEvent: EventCallback;
   private maxSteps = 10;
   private context: ContextItem[] = [];
+  private storage: FileStorage;
 
-  constructor(sessionId: string, onEvent: EventCallback, context?: ContextItem[]) {
+  constructor(sessionId: string, onEvent: EventCallback, context?: ContextItem[], storage?: FileStorage) {
     this.sessionId = sessionId;
     this.onEvent = onEvent;
     this.context = context || [];
+    // Use provided vault-scoped storage, or import the default
+    this.storage = storage || require("./storage").storage;
     // Rebuild conversation history from persisted session events
     this.loadHistory();
   }
@@ -348,7 +351,7 @@ export class Agent {
    * images from earlier turns.
    */
   private loadHistory() {
-    const session = storage.getSession(this.sessionId);
+    const session = this.storage.getSession(this.sessionId);
     if (!session || !session.events || session.events.length === 0) return;
 
     for (const event of session.events) {
@@ -403,7 +406,7 @@ export class Agent {
       timestamp: new Date().toISOString(),
     };
     this.onEvent(event);
-    storage.addChatEvent(this.sessionId, event);
+    this.storage.addChatEvent(this.sessionId, event);
   }
 
   async run(userMessage: string, images?: Array<{ url: string; mediaType: string }>): Promise<void> {
@@ -437,7 +440,7 @@ export class Agent {
       return;
     }
 
-    let systemPrompt = buildSystemPrompt();
+    let systemPrompt = buildSystemPrompt(this.storage);
 
     // Inject context items into system prompt
     if (this.context.length > 0) {
@@ -450,7 +453,7 @@ export class Agent {
       systemPrompt += `\n\n## Active Context\nThe user is viewing the following items. Reference them directly when relevant.\n\n${contextBlock}`;
     }
 
-    const tools = getToolDefinitions();
+    const tools = getToolDefinitions(this.storage);
 
     try {
       if (provider === "claude") {
@@ -474,7 +477,7 @@ export class Agent {
     let step = 0;
     while (step < this.maxSteps) {
       step++;
-      const msgs = messagesToClaude(this.messages);
+      const msgs = messagesToClaude(this.messages, this.storage);
       this.emit("thought", `Reasoning... (step ${step}/${this.maxSteps})`);
 
       const response = await client.messages.create({
@@ -494,7 +497,7 @@ export class Agent {
         } else if (block.type === "tool_use") {
           hasToolUse = true;
           this.emit("tool_call", JSON.stringify({ name: block.name, args: block.input }), { tool: block.name });
-          const result = await executeTool(block.name, block.input as Record<string, any>);
+          const result = await executeTool(block.name, block.input as Record<string, any>, this.storage);
           this.emit("tool_result", result, { tool: block.name });
           this.messages.push({ role: "assistant", content: `[Tool: ${block.name}] ${JSON.stringify(block.input)}` });
           this.messages.push({ role: "user", content: `[Tool Result for ${block.name}]: ${result}` });
@@ -526,7 +529,7 @@ export class Agent {
     }));
 
     let step = 0;
-    const openaiMessages: any[] = messagesToOpenAI(this.messages, systemPrompt);
+    const openaiMessages: any[] = messagesToOpenAI(this.messages, systemPrompt, this.storage);
 
     while (step < this.maxSteps) {
       step++;
@@ -553,7 +556,7 @@ export class Agent {
           const fn = tc.function;
           const args = JSON.parse(fn.arguments);
           this.emit("tool_call", JSON.stringify({ name: fn.name, args }), { tool: fn.name });
-          const result = await executeTool(fn.name, args);
+          const result = await executeTool(fn.name, args, this.storage);
           this.emit("tool_result", result, { tool: fn.name });
           openaiMessages.push({ role: "tool", tool_call_id: tc.id, content: result });
           this.messages.push({ role: "user", content: `[Tool Result for ${fn.name}]: ${result}` });
@@ -581,7 +584,7 @@ export class Agent {
           text = textBlock?.type === "text" ? textBlock.text : "Image conversation";
         }
         const title = text.slice(0, 60) + (text.length > 60 ? "..." : "");
-        storage.updateSession(this.sessionId, { title, status: "completed" });
+        this.storage.updateSession(this.sessionId, { title, status: "completed" });
       }
     }
   }

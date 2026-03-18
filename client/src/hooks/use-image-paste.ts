@@ -1,5 +1,5 @@
 import { useState, useCallback, useRef } from "react";
-import { apiRequest } from "@/lib/queryClient";
+import { apiRequest, withVault } from "@/lib/queryClient";
 
 export interface PendingImage {
   id: string;
@@ -10,7 +10,7 @@ export interface PendingImage {
   error?: string;
 }
 
-export function useImagePaste() {
+export function useImagePaste(vaultParam?: string) {
   const [pendingImages, setPendingImages] = useState<PendingImage[]>([]);
   const idCounter = useRef(0);
 
@@ -23,7 +23,8 @@ export function useImagePaste() {
     try {
       const formData = new FormData();
       formData.append("file", file, file.name || "pasted-image.png");
-      const res = await fetch("/api/chat/assets", { method: "POST", body: formData });
+      const url = vaultParam ? withVault("/api/chat/assets", vaultParam) : "/api/chat/assets";
+      const res = await fetch(url, { method: "POST", body: formData });
       if (!res.ok) throw new Error("Upload failed");
       const data = await res.json();
 

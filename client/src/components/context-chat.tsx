@@ -1,6 +1,7 @@
 import { useState, useEffect, useRef, useCallback } from "react";
 import { useQueryClient } from "@tanstack/react-query";
-import { apiRequest } from "@/lib/queryClient";
+import { apiRequest, withVault } from "@/lib/queryClient";
+import { useVault } from "@/hooks/use-vault";
 import { Button } from "@/components/ui/button";
 import { Textarea } from "@/components/ui/textarea";
 import { Badge } from "@/components/ui/badge";
@@ -55,10 +56,11 @@ export function ContextChat({ context, open, onClose, placeholder }: ContextChat
   const inputRef = useRef<HTMLTextAreaElement>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
   const queryClient = useQueryClient();
+  const { vaultParam, vaultId } = useVault();
   const {
     pendingImages, uploadedImages, hasImages, allUploaded, isUploading,
     addImage, removeImage, clearImages, handlePaste, handleDrop, handleDragOver,
-  } = useImagePaste();
+  } = useImagePaste(vaultParam);
 
   // Reset when context changes significantly
   const contextKey = context.map(c => c.id || c.title).join(",");
@@ -132,7 +134,7 @@ export function ContextChat({ context, open, onClose, placeholder }: ContextChat
     setInput("");
     clearImages();
 
-    const payload: any = { type: "chat", message: msg, context };
+    const payload: any = { type: "chat", message: msg, context, vaultId };
     if (images) payload.images = images;
 
     let sid = sessionId;
@@ -141,7 +143,7 @@ export function ContextChat({ context, open, onClose, placeholder }: ContextChat
         const contextTitle = context.length > 0
           ? `About: ${context.map(c => c.title).join(", ").slice(0, 50)}`
           : "Context Chat";
-        const res = await apiRequest("POST", "/api/chat/sessions", { title: contextTitle });
+        const res = await apiRequest("POST", withVault("/api/chat/sessions", vaultParam), { title: contextTitle });
         const session = await res.json();
         sid = session.id;
         setSessionId(session.id);

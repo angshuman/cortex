@@ -24,6 +24,13 @@ export async function apiRequest(
   return res;
 }
 
+/** Append vault query param to a URL. Handles existing query strings. */
+export function withVault(url: string, vaultParam: string): string {
+  if (!vaultParam) return url;
+  const sep = url.includes("?") ? "&" : "?";
+  return `${url}${sep}${vaultParam.startsWith("?") ? vaultParam.slice(1) : vaultParam}`;
+}
+
 type UnauthorizedBehavior = "returnNull" | "throw";
 export const getQueryFn: <T>(options: {
   on401: UnauthorizedBehavior;

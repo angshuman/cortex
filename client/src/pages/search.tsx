@@ -1,6 +1,7 @@
 import { useState, useCallback } from "react";
 import { useQuery } from "@tanstack/react-query";
-import { apiRequest } from "@/lib/queryClient";
+import { apiRequest, withVault } from "@/lib/queryClient";
+import { useVault } from "@/hooks/use-vault";
 import { Input } from "@/components/ui/input";
 import { Badge } from "@/components/ui/badge";
 import { SidebarTrigger } from "@/components/ui/sidebar";
@@ -31,11 +32,12 @@ const typeConfig = {
 export default function SearchPage() {
   const [query, setQuery] = useState("");
   const [, setLocation] = useLocation();
+  const { vaultParam, vaultId } = useVault();
 
   const { data: results = [], isLoading } = useQuery<SearchResult[]>({
-    queryKey: ["/api/search", query],
-    queryFn: () => query.length >= 2 ? apiRequest("GET", `/api/search?q=${encodeURIComponent(query)}`).then(r => r.json()) : Promise.resolve([]),
-    enabled: query.length >= 2,
+    queryKey: ["/api/search", query, vaultId],
+    queryFn: () => query.length >= 2 ? apiRequest("GET", withVault(`/api/search?q=${encodeURIComponent(query)}`, vaultParam)).then(r => r.json()) : Promise.resolve([]),
+    enabled: query.length >= 2 && !!vaultId,
   });
 
   const handleResultClick = (result: SearchResult) => {

@@ -1,6 +1,7 @@
 import { useState, useEffect, useRef, useCallback } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
-import { apiRequest } from "@/lib/queryClient";
+import { apiRequest, withVault } from "@/lib/queryClient";
+import { useVault } from "@/hooks/use-vault";
 import { useRoute, useLocation } from "wouter";
 import { Button } from "@/components/ui/button";
 import { Textarea } from "@/components/ui/textarea";
@@ -46,17 +47,18 @@ export default function ChatPage() {
   const inputRef = useRef<HTMLTextAreaElement>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
   const queryClient = useQueryClient();
+  const { vaultParam, vaultId, activeVault } = useVault();
   const {
     pendingImages, uploadedImages, hasImages, allUploaded, isUploading,
     addImage, removeImage, clearImages, handlePaste, handleDrop, handleDragOver,
-  } = useImagePaste();
+  } = useImagePaste(vaultParam);
   const [isDragging, setIsDragging] = useState(false);
 
   // Load existing session
   const { data: session } = useQuery({
-    queryKey: ["/api/chat/sessions", sessionId],
-    queryFn: () => sessionId ? apiRequest("GET", `/api/chat/sessions/${sessionId}`).then(r => r.json()) : null,
-    enabled: !!sessionId,
+    queryKey: ["/api/chat/sessions", sessionId, vaultId],
+    queryFn: () => sessionId ? apiRequest("GET", withVault(`/api/chat/sessions/${sessionId}`, vaultParam)).then(r => r.json()) : null,
+    enabled: !!sessionId && !!vaultId,
   });
 
   useEffect(() => {
@@ -117,13 +119,13 @@ export default function ChatPage() {
     setInput("");
     clearImages();
 
-    const payload: any = { type: "chat", message: msg };
+    const payload: any = { type: "chat", message: msg, vaultId };
     if (images) payload.images = images;
 
     let targetSessionId = sessionId;
     if (!targetSessionId) {
       try {
-        const res = await apiRequest("POST", "/api/chat/sessions", { title: "New Chat" });
+        const res = await apiRequest("POST", withVault("/api/chat/sessions", vaultParam), { title: "New Chat" });
         const session = await res.json();
         targetSessionId = session.id;
         setLocation(`/chat/${session.id}`);
@@ -163,7 +165,7 @@ export default function ChatPage() {
 
   const handleNewChat = async () => {
     try {
-      const res = await apiRequest("POST", "/api/chat/sessions", { title: "New Chat" });
+      const res = await apiRequest("POST", withVault("/api/chat/sessions", vaultParam), { title: "New Chat" });
       const session = await res.json();
       setEvents([]);
       setStatus("idle");

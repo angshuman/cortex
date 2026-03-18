@@ -1,6 +1,7 @@
 import { useState, useEffect } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
-import { apiRequest } from "@/lib/queryClient";
+import { apiRequest, withVault } from "@/lib/queryClient";
+import { useVault } from "@/hooks/use-vault";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Badge } from "@/components/ui/badge";
@@ -41,6 +42,7 @@ interface Skill {
 export default function SettingsPage() {
   const { toast } = useToast();
   const queryClient = useQueryClient();
+  const { vaultParam, vaultId } = useVault();
 
   const { data: config } = useQuery({
     queryKey: ["/api/config"],
@@ -53,8 +55,9 @@ export default function SettingsPage() {
   });
 
   const { data: skills = [] } = useQuery<Skill[]>({
-    queryKey: ["/api/skills"],
-    queryFn: () => apiRequest("GET", "/api/skills").then(r => r.json()),
+    queryKey: ["/api/skills", vaultId],
+    queryFn: () => apiRequest("GET", withVault("/api/skills", vaultParam)).then(r => r.json()),
+    enabled: !!vaultId,
   });
 
   const updateConfig = useMutation({
@@ -66,7 +69,7 @@ export default function SettingsPage() {
   });
 
   const toggleSkill = useMutation({
-    mutationFn: (skill: Skill) => apiRequest("POST", "/api/skills", { ...skill, enabled: !skill.enabled }),
+    mutationFn: (skill: Skill) => apiRequest("POST", withVault("/api/skills", vaultParam), { ...skill, enabled: !skill.enabled }),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["/api/skills"] });
     },
