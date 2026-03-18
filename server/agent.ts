@@ -338,6 +338,60 @@ export class Agent {
     this.sessionId = sessionId;
     this.onEvent = onEvent;
     this.context = context || [];
+    // Rebuild conversation history from persisted session events
+    this.loadHistory();
+  }
+
+  /**
+   * Reconstruct AgentMessage[] from the persisted ChatEvents in this session.
+   * This ensures follow-up messages have full conversation context including
+   * images from earlier turns.
+   */
+  private loadHistory() {
+    const session = storage.getSession(this.sessionId);
+    if (!session || !session.events || session.events.length === 0) return;
+
+    for (const event of session.events) {
+      if (event.type === "message") {
+        const role = event.metadata?.role as "user" | "assistant" | undefined;
+        if (!role) continue;
+
+        if (role === "user") {
+          // Check if this user message had images attached
+          const imageUrls: string[] = event.metadata?.images || [];
+          if (imageUrls.length > 0) {
+            // Reconstruct multimodal content blocks
+            const blocks: ContentBlock[] = [];
+            for (const url of imageUrls) {
+              // Guess mediaType from extension
+              const ext = url.split(".").pop()?.toLowerCase() || "png";
+              const mimeMap: Record<string, string> = {
+                png: "image/png", jpg: "image/jpeg", jpeg: "image/jpeg",
+                gif: "image/gif", webp: "image/webp",
+              };
+              blocks.push({ type: "image", url, mediaType: mimeMap[ext] || "image/png" });
+            }
+            // Extract the text portion (strip image markdown)
+            const textContent = event.content.replace(/!\[image\]\([^)]+\)\n?/g, "").trim();
+            if (textContent) {
+              blocks.push({ type: "text", text: textContent });
+            } else {
+              // Image-only: add a brief note so the LLM knows an image was analyzed
+              blocks.push({ type: "text", text: "(user sent an image)" });
+            }
+            this.messages.push({ role: "user", content: blocks });
+          } else {
+            // Pure text message
+            this.messages.push({ role: "user", content: event.content });
+          }
+        } else if (role === "assistant") {
+          this.messages.push({ role: "assistant", content: event.content });
+        }
+      }
+      // We skip thought, tool_call, tool_result events for history reconstruction.
+      // The assistant's final text response already summarizes tool results,
+      // and re-including tool calls would confuse the conversation flow.
+    }
   }
 
   private emit(type: ChatEvent["type"], content: string, metadata?: Record<string, any>) {
@@ -518,7 +572,15 @@ export class Agent {
     if (this.messages.length <= 4) {
       const firstMsg = this.messages.find(m => m.role === "user");
       if (firstMsg) {
-        const title = firstMsg.content.slice(0, 60) + (firstMsg.content.length > 60 ? "..." : "");
+        let text = "";
+        if (typeof firstMsg.content === "string") {
+          text = firstMsg.content;
+        } else {
+          // Extract text from content blocks
+          const textBlock = firstMsg.content.find(b => b.type === "text");
+          text = textBlock?.type === "text" ? textBlock.text : "Image conversation";
+        }
+        const title = text.slice(0, 60) + (text.length > 60 ? "..." : "");
         storage.updateSession(this.sessionId, { title, status: "completed" });
       }
     }
