@@ -73,24 +73,27 @@ function getToolDefinitions(storage: FileStorage): ToolDef[] {
     }
   }
   
-  // Add tools from connected MCP servers (e.g. Playwright browser)
-  const mcpTools = mcpManager.getTools();
-  for (const mcpTool of mcpTools) {
-    // Don't add if a skill already defines this tool name
-    if (skillToolNames.has(mcpTool.name)) continue;
-    
-    // Convert MCP inputSchema to our ToolDef format
-    const schema = mcpTool.inputSchema || {};
-    tools.push({
-      name: mcpTool.name,
-      description: `[browser] ${mcpTool.description}`,
-      parameters: {
-        type: "object" as const,
-        properties: schema.properties || {},
-        required: schema.required || [],
-      },
-    });
-  }
+  // Add tools from all connected MCP servers
+  const toolsByServer = mcpManager.getToolsByServer();
+  Array.from(toolsByServer.entries()).forEach(([serverName, mcpTools]) => {
+    for (const mcpTool of mcpTools) {
+      // Don't add if a skill already defines this tool name
+      if (skillToolNames.has(mcpTool.name)) continue;
+      
+      // Convert MCP inputSchema to our ToolDef format
+      const schema = mcpTool.inputSchema || {};
+      tools.push({
+        name: mcpTool.name,
+        description: `[${serverName}] ${mcpTool.description}`,
+        parameters: {
+          type: "object" as const,
+          properties: schema.properties || {},
+          required: schema.required || [],
+        },
+      });
+      skillToolNames.add(mcpTool.name); // Prevent duplicates across servers
+    }
+  });
   
   return tools;
 }
@@ -348,25 +351,37 @@ function buildSystemPrompt(storage: FileStorage, vaultSettings?: VaultSettings, 
     ? `Notes available:\n${notes.slice(0, 15).map((n: any) => `- "${n.title}" in ${n.folder}`).join("\n")}`
     : "No notes yet.";
 
-  const browserMode = vaultSettings?.browserHeadless ? "headless (no visible window)" : "visible (browser window will open)";
-  const browserConnected = mcpManager.isConnected("playwright");
-  const mcpTools = mcpManager.getTools("playwright");
-  const browserStatus = browserConnected
-    ? `Browser is CONNECTED via Playwright MCP (${browserMode} mode). Available browser tools: ${mcpTools.map(t => t.name).join(", ")}.\nWhen browsing, always start with browser_snapshot to see the page accessibility tree, then use ref attributes to interact with elements.`
-    : `Browser is NOT connected. The user needs to enable Playwright in Settings > General > Browser Backend, and ensure @playwright/mcp is installed (npx @playwright/mcp).`;
+  // Build MCP server status for all connected servers
+  const toolsByServer = mcpManager.getToolsByServer();
+  const mcpStatusParts: string[] = [];
+  
+  if (mcpManager.isConnected("playwright")) {
+    const browserMode = vaultSettings?.browserHeadless ? "headless (no visible window)" : "visible (browser window will open)";
+    const pwTools = mcpManager.getTools("playwright");
+    mcpStatusParts.push(`**Playwright Browser** — CONNECTED (${browserMode} mode). ${pwTools.length} tools available: ${pwTools.map(t => t.name).join(", ")}.\nWhen browsing, always start with browser_snapshot to see the page accessibility tree, then use ref attributes to interact with elements.`);
+  }
+  
+  Array.from(toolsByServer.entries()).forEach(([serverName, tools]) => {
+    if (serverName === "playwright") return; // Already handled above
+    mcpStatusParts.push(`**${serverName}** — CONNECTED. ${tools.length} tools available: ${tools.map((t: any) => t.name).join(", ")}.`);
+  });
+  
+  const mcpStatus = mcpStatusParts.length > 0
+    ? mcpStatusParts.join("\n\n")
+    : "No MCP servers connected. The user can add servers in Settings > General > MCP Servers.";
 
   return `You are Cortex, a personal AI operating system assistant. You are a reasoner, planner, and note-taker.
 
 ## Your Capabilities
 - Create, read, update, and organize notes (markdown with image support)
 - Create, manage, and track tasks and subtasks
-- Browse the web using Playwright browser automation (see Browser Status below)
+- Browse the web, access Microsoft 365 data, and more via MCP servers (see MCP Servers below)
 - Search across all notes, tasks, and conversations
 - Plan and reason through complex problems step by step
 - **Vision**: You can see and analyze images pasted into chat
 
-## Browser Status
-${browserStatus}
+## MCP Servers
+${mcpStatus}
 
 ## Image Handling
 When a user sends images:

@@ -1,34 +1,74 @@
 /**
  * MCP Client Manager
  * 
- * Manages connections to MCP servers (e.g. Playwright browser automation).
+ * Generic manager for MCP (Model Context Protocol) server connections.
  * Spawns MCP servers as child processes using stdio transport,
  * discovers their tools, and routes tool calls through them.
+ * 
+ * Supports any MCP-compatible server — Playwright, WorkIQ, etc.
+ * Known server presets provide sensible defaults for common servers.
  */
 import { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import { StdioClientTransport } from "@modelcontextprotocol/sdk/client/stdio.js";
 import type { Config } from "@shared/schema";
 
-interface McpTool {
+export interface McpTool {
   name: string;
   description: string;
   inputSchema: Record<string, any>;
 }
 
-interface McpConnection {
+export interface McpConnection {
   client: Client;
   transport: StdioClientTransport;
   tools: McpTool[];
   serverName: string;
 }
 
+/**
+ * Known MCP server presets — provides sensible defaults for popular servers.
+ * Users can override any of these via config, or add entirely custom servers.
+ */
+export interface McpServerPreset {
+  label: string;
+  description: string;
+  command: string;
+  args: string[];
+  env?: Record<string, string>;
+  /** Additional args appended conditionally (e.g. --headless for Playwright) */
+  optionalArgs?: (config: Config) => string[];
+  /** Notes shown in UI about auth/setup requirements */
+  setupNotes?: string;
+  /** npm package to install globally (for display) */
+  npmPackage?: string;
+}
+
+export const MCP_PRESETS: Record<string, McpServerPreset> = {
+  playwright: {
+    label: "Playwright",
+    description: "Browser automation — navigate, click, fill forms, take screenshots",
+    command: "npx",
+    args: ["@playwright/mcp"],
+    npmPackage: "@playwright/mcp",
+    setupNotes: "Install globally: npm install -g @playwright/mcp",
+  },
+  workiq: {
+    label: "WorkIQ (Microsoft 365)",
+    description: "Access emails, meetings, documents, Teams messages, and people from Microsoft 365",
+    command: "npx",
+    args: ["-y", "@microsoft/workiq", "mcp"],
+    npmPackage: "@microsoft/workiq",
+    setupNotes: "Requires Microsoft 365 + Copilot license. Run 'npx @microsoft/workiq accept-eula' first, then authenticate with your Microsoft Entra account. Optional: add --tenant-id <id> in args.",
+  },
+};
+
 class McpClientManager {
   private connections = new Map<string, McpConnection>();
   private connecting = new Map<string, Promise<McpConnection>>();
 
   /**
-   * Connect to an MCP server by name. If already connected, returns existing connection.
-   * The server config comes from the global config's mcpServers map.
+   * Connect to an MCP server by name.
+   * If already connected, returns existing connection.
    */
   async connect(
     serverName: string,
@@ -98,7 +138,7 @@ class McpClientManager {
   async callTool(serverName: string, toolName: string, args: Record<string, any>): Promise<string> {
     const conn = this.connections.get(serverName);
     if (!conn) {
-      throw new Error(`MCP server "${serverName}" is not connected. Configure it in Settings > General > Browser Backend.`);
+      throw new Error(`MCP server "${serverName}" is not connected. Configure it in Settings > General > MCP Servers.`);
     }
 
     const result = await conn.client.callTool({ name: toolName, arguments: args });
@@ -129,9 +169,9 @@ class McpClientManager {
       return this.connections.get(serverName)?.tools || [];
     }
     const all: McpTool[] = [];
-    for (const conn of this.connections.values()) {
+    Array.from(this.connections.values()).forEach(conn => {
       all.push(...conn.tools);
-    }
+    });
     return all;
   }
 
@@ -139,10 +179,22 @@ class McpClientManager {
    * Find which server provides a given tool name.
    */
   findServerForTool(toolName: string): string | null {
-    for (const [name, conn] of this.connections) {
-      if (conn.tools.some(t => t.name === toolName)) return name;
+    for (const [name, conn] of Array.from(this.connections.entries())) {
+      if (conn.tools.some((t: McpTool) => t.name === toolName)) return name;
     }
     return null;
+  }
+
+  /**
+   * Get tools grouped by server name.
+   * Returns a map of server name -> tools array.
+   */
+  getToolsByServer(): Map<string, McpTool[]> {
+    const result = new Map<string, McpTool[]>();
+    Array.from(this.connections.entries()).forEach(([name, conn]) => {
+      result.set(name, conn.tools);
+    });
+    return result;
   }
 
   /**
@@ -177,49 +229,170 @@ class McpClientManager {
   }
 
   /**
+   * Resolve the command/args for a named server.
+   * Checks config.mcpServers first, then falls back to known presets.
+   * For Playwright, also handles --headless flag from vault settings.
+   */
+  resolveServerConfig(
+    serverName: string,
+    config: Config,
+    headless: boolean = false,
+  ): { command: string; args: string[]; env?: Record<string, string> } | null {
+    // Check user config first (explicit overrides)
+    const userConfig = config.mcpServers?.[serverName];
+    if (userConfig) {
+      let args = [...userConfig.args];
+      // For playwright, append --headless if needed
+      if (serverName === "playwright" && headless && !args.includes("--headless")) {
+        args.push("--headless");
+      }
+      return { command: userConfig.command, args, env: userConfig.env };
+    }
+
+    // Fall back to presets
+    const preset = MCP_PRESETS[serverName];
+    if (preset) {
+      let args = [...preset.args];
+      if (serverName === "playwright" && headless) {
+        args.push("--headless");
+      }
+      return { command: preset.command, args, env: preset.env };
+    }
+
+    return null;
+  }
+
+  /**
+   * Connect a single server by name, using config + preset resolution.
+   */
+  async connectServer(
+    serverName: string,
+    config: Config,
+    headless: boolean = false,
+  ): Promise<boolean> {
+    if (this.isConnected(serverName)) return true;
+
+    const resolved = this.resolveServerConfig(serverName, config, headless);
+    if (!resolved) {
+      console.error(`[MCP] No config or preset found for server "${serverName}"`);
+      return false;
+    }
+
+    try {
+      await this.connect(serverName, resolved.command, resolved.args, resolved.env);
+      return true;
+    } catch (err: any) {
+      console.error(`[MCP] Failed to connect to "${serverName}": ${err.message}`);
+      return false;
+    }
+  }
+
+  /**
+   * Initialize all MCP servers from config.
+   * Connects servers listed in config.mcpServers.
+   * Also handles legacy browserBackend field for backward compatibility.
+   */
+  async initFromConfig(config: Config, headless: boolean = false): Promise<void> {
+    // Handle legacy browserBackend field
+    if (config.browserBackend === "playwright-mcp") {
+      if (!this.isConnected("playwright")) {
+        await this.connectServer("playwright", config, headless);
+      }
+    } else {
+      // Browser disabled — disconnect if was previously connected
+      if (this.isConnected("playwright")) {
+        await this.disconnect("playwright");
+      }
+    }
+
+    // Connect all servers in mcpServers config
+    for (const serverName of Object.keys(config.mcpServers || {})) {
+      if (serverName === "playwright") continue; // Already handled above
+      if (!this.isConnected(serverName)) {
+        await this.connectServer(serverName, config, headless);
+      }
+    }
+  }
+
+  /**
    * Initialize the Playwright MCP server based on config.
-   * This is the main entry point called at startup or when settings change.
+   * Backward-compatible convenience method.
    */
   async initPlaywright(config: Config, headless: boolean = false): Promise<boolean> {
     if (config.browserBackend !== "playwright-mcp") {
-      // Browser not enabled; disconnect if was previously connected
       if (this.isConnected("playwright")) {
         await this.disconnect("playwright");
       }
       return false;
     }
 
-    // Already connected
-    if (this.isConnected("playwright")) return true;
-
-    // Check if there's a custom MCP server config for playwright
-    const customConfig = config.mcpServers?.["playwright"];
-    
-    const command = customConfig?.command || "npx";
-    const args = customConfig?.args || ["@playwright/mcp", ...(headless ? ["--headless"] : [])];
-    const env = customConfig?.env;
-
-    try {
-      await this.connect("playwright", command, args, env);
-      return true;
-    } catch (err: any) {
-      console.error(`[MCP] Failed to connect to Playwright: ${err.message}`);
-      return false;
-    }
+    return this.connectServer("playwright", config, headless);
   }
 
   /**
    * Get connection status summary for the UI.
+   * Includes both connected servers and configured-but-not-connected servers.
    */
-  getStatus(): Record<string, { connected: boolean; tools: string[] }> {
-    const status: Record<string, { connected: boolean; tools: string[] }> = {};
-    for (const [name, conn] of this.connections) {
+  getStatus(config?: Config): Record<string, { connected: boolean; tools: string[]; label: string; description: string; setupNotes?: string }> {
+    const status: Record<string, { connected: boolean; tools: string[]; label: string; description: string; setupNotes?: string }> = {};
+
+    // Add connected servers
+    Array.from(this.connections.entries()).forEach(([name, conn]) => {
+      const preset = MCP_PRESETS[name];
       status[name] = {
         connected: true,
-        tools: conn.tools.map(t => t.name),
+        tools: conn.tools.map((t: McpTool) => t.name),
+        label: preset?.label || name,
+        description: preset?.description || `MCP server: ${name}`,
+        setupNotes: preset?.setupNotes,
+      };
+    });
+
+    // Add configured but not yet connected servers
+    if (config?.mcpServers) {
+      for (const name of Object.keys(config.mcpServers)) {
+        if (!status[name]) {
+          const preset = MCP_PRESETS[name];
+          status[name] = {
+            connected: false,
+            tools: [],
+            label: preset?.label || name,
+            description: preset?.description || `MCP server: ${name}`,
+            setupNotes: preset?.setupNotes,
+          };
+        }
+      }
+    }
+
+    // Add playwright if enabled via legacy field
+    if (config?.browserBackend === "playwright-mcp" && !status["playwright"]) {
+      const preset = MCP_PRESETS["playwright"];
+      status["playwright"] = {
+        connected: false,
+        tools: [],
+        label: preset.label,
+        description: preset.description,
+        setupNotes: preset.setupNotes,
       };
     }
+
     return status;
+  }
+
+  /**
+   * Get info about all known presets (for the UI to display as options).
+   */
+  getPresets(): Record<string, { label: string; description: string; setupNotes?: string; npmPackage?: string }> {
+    const result: Record<string, { label: string; description: string; setupNotes?: string; npmPackage?: string }> = {};
+    for (const [name, preset] of Object.entries(MCP_PRESETS)) {
+      result[name] = {
+        label: preset.label,
+        description: preset.description,
+        setupNotes: preset.setupNotes,
+        npmPackage: preset.npmPackage,
+      };
+    }
+    return result;
   }
 }
 

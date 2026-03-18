@@ -42,6 +42,13 @@ import {
   Timer,
   FileText,
   Thermometer,
+  Plus,
+  Trash2,
+  Server,
+  RefreshCw,
+  AlertCircle,
+  Terminal,
+  ExternalLink,
 } from "lucide-react";
 import { useToast } from "@/hooks/use-toast";
 
@@ -184,8 +191,8 @@ export default function SettingsPage() {
                 </div>
               </Card>
 
-              {/* Browser */}
-              <BrowserBackendCard config={config} updateConfig={updateConfig} />
+              {/* MCP Servers */}
+              <McpServersCard config={config} updateConfig={updateConfig} />
 
               {/* Storage */}
               <Card className="p-4">
@@ -621,8 +628,8 @@ function AgentSettingsCard({
   );
 }
 
-/** Browser Backend settings card with MCP status */
-function BrowserBackendCard({
+/** MCP Servers card — manage all MCP server connections */
+function McpServersCard({
   config,
   updateConfig,
 }: {
@@ -631,151 +638,375 @@ function BrowserBackendCard({
 }) {
   const { toast } = useToast();
   const queryClient = useQueryClient();
-  const [connecting, setConnecting] = useState(false);
+  const [connectingServer, setConnectingServer] = useState<string | null>(null);
+  const [showAddDialog, setShowAddDialog] = useState(false);
+  const [customName, setCustomName] = useState("");
+  const [customCommand, setCustomCommand] = useState("");
+  const [customArgs, setCustomArgs] = useState("");
 
-  const { data: mcpStatus, refetch: refetchMcpStatus } = useQuery({
+  // Poll MCP server status
+  const { data: mcpStatus = {}, refetch: refetchMcpStatus } = useQuery<Record<string, any>>({
     queryKey: ["/api/mcp/status"],
     queryFn: () => apiRequest("GET", "/api/mcp/status").then(r => r.json()),
     refetchInterval: 5000,
   });
 
-  const isPlaywrightConnected = mcpStatus?.playwright?.connected === true;
-  const playwrightTools = mcpStatus?.playwright?.tools || [];
-  const isEnabled = config?.browserBackend === "playwright-mcp";
+  // Get available presets
+  const { data: presets = {} } = useQuery<Record<string, any>>({
+    queryKey: ["/api/mcp/presets"],
+    queryFn: () => apiRequest("GET", "/api/mcp/presets").then(r => r.json()),
+  });
 
-  const handleToggle = async (value: string) => {
-    updateConfig.mutate({ browserBackend: value });
-    if (value === "playwright-mcp") {
-      // Auto-connect after enabling
-      setConnecting(true);
-      try {
-        await apiRequest("POST", "/api/mcp/connect");
-        await refetchMcpStatus();
-        toast({ title: "Browser connected", description: "Playwright MCP is now active" });
-      } catch (err: any) {
-        toast({ title: "Connection failed", description: err.message, variant: "destructive" });
-      } finally {
-        setConnecting(false);
-      }
-    } else {
-      // Disconnect
-      try {
-        await apiRequest("POST", "/api/mcp/disconnect");
-        await refetchMcpStatus();
-      } catch (e) {}
-    }
-  };
+  const configuredServers = Object.keys(config?.mcpServers || {});
+  // Merge: configured servers + connected servers (may include playwright via legacy field)
+  const allServerNames = Array.from(new Set([
+    ...configuredServers,
+    ...Object.keys(mcpStatus),
+  ]));
 
-  const handleReconnect = async () => {
-    setConnecting(true);
+  // Preset names not yet added
+  const availablePresets = Object.entries(presets).filter(
+    ([name]) => !allServerNames.includes(name)
+  );
+
+  const handleConnect = async (serverName: string) => {
+    setConnectingServer(serverName);
     try {
-      // Disconnect first, then reconnect
-      await apiRequest("POST", "/api/mcp/disconnect");
-      const resp = await apiRequest("POST", "/api/mcp/connect");
+      // For playwright, also ensure browserBackend is set
+      if (serverName === "playwright" && config?.browserBackend !== "playwright-mcp") {
+        updateConfig.mutate({ browserBackend: "playwright-mcp" });
+      }
+      const resp = await apiRequest("POST", `/api/mcp/connect/${serverName}`);
       const result = await resp.json();
       await refetchMcpStatus();
       if (result.connected) {
-        toast({ title: "Reconnected", description: "Playwright MCP is active" });
+        toast({ title: "Connected", description: `${serverName} is now active` });
       } else {
-        toast({ title: "Connection failed", description: "Check that @playwright/mcp is installed", variant: "destructive" });
+        toast({ title: "Connection failed", description: `Could not connect to ${serverName}`, variant: "destructive" });
       }
     } catch (err: any) {
       toast({ title: "Connection failed", description: err.message, variant: "destructive" });
     } finally {
-      setConnecting(false);
+      setConnectingServer(null);
     }
   };
+
+  const handleDisconnect = async (serverName: string) => {
+    try {
+      await apiRequest("POST", `/api/mcp/disconnect/${serverName}`);
+      await refetchMcpStatus();
+      // For playwright, also disable the legacy field
+      if (serverName === "playwright") {
+        updateConfig.mutate({ browserBackend: "none" });
+      }
+      toast({ title: "Disconnected", description: `${serverName} has been disconnected` });
+    } catch (err: any) {
+      toast({ title: "Error", description: err.message, variant: "destructive" });
+    }
+  };
+
+  const handleReconnect = async (serverName: string) => {
+    setConnectingServer(serverName);
+    try {
+      await apiRequest("POST", `/api/mcp/disconnect/${serverName}`);
+      const resp = await apiRequest("POST", `/api/mcp/connect/${serverName}`);
+      const result = await resp.json();
+      await refetchMcpStatus();
+      if (result.connected) {
+        toast({ title: "Reconnected", description: `${serverName} is active` });
+      } else {
+        toast({ title: "Reconnect failed", variant: "destructive" });
+      }
+    } catch (err: any) {
+      toast({ title: "Reconnect failed", description: err.message, variant: "destructive" });
+    } finally {
+      setConnectingServer(null);
+    }
+  };
+
+  const handleAddPreset = async (presetName: string) => {
+    try {
+      await apiRequest("POST", "/api/mcp/servers", { name: presetName });
+      queryClient.invalidateQueries({ queryKey: ["/api/config"] });
+      await refetchMcpStatus();
+      toast({ title: "Server added", description: `${presetName} has been configured` });
+      setShowAddDialog(false);
+      // Auto-connect
+      handleConnect(presetName);
+    } catch (err: any) {
+      toast({ title: "Error", description: err.message, variant: "destructive" });
+    }
+  };
+
+  const handleAddCustom = async () => {
+    if (!customName.trim() || !customCommand.trim()) {
+      toast({ title: "Name and command are required", variant: "destructive" });
+      return;
+    }
+    const args = customArgs.trim() ? customArgs.trim().split(/\s+/) : [];
+    try {
+      await apiRequest("POST", "/api/mcp/servers", {
+        name: customName.trim(),
+        command: customCommand.trim(),
+        args,
+      });
+      queryClient.invalidateQueries({ queryKey: ["/api/config"] });
+      await refetchMcpStatus();
+      toast({ title: "Server added", description: `${customName} has been configured` });
+      setCustomName("");
+      setCustomCommand("");
+      setCustomArgs("");
+      setShowAddDialog(false);
+    } catch (err: any) {
+      toast({ title: "Error", description: err.message, variant: "destructive" });
+    }
+  };
+
+  const handleRemove = async (serverName: string) => {
+    try {
+      await apiRequest("DELETE", `/api/mcp/servers/${serverName}`);
+      queryClient.invalidateQueries({ queryKey: ["/api/config"] });
+      await refetchMcpStatus();
+      // For playwright, also clear legacy field
+      if (serverName === "playwright") {
+        updateConfig.mutate({ browserBackend: "none" });
+      }
+      toast({ title: "Server removed", description: `${serverName} has been removed` });
+    } catch (err: any) {
+      toast({ title: "Error", description: err.message, variant: "destructive" });
+    }
+  };
+
+  const connectedCount = Object.values(mcpStatus).filter((s: any) => s.connected).length;
 
   return (
     <Card className="p-4">
       <div className="flex items-center gap-2 mb-3">
-        <Globe className="w-4 h-4 text-primary" />
-        <h3 className="text-sm font-medium">Browser Backend</h3>
-        {isEnabled && (
+        <Server className="w-4 h-4 text-primary" />
+        <h3 className="text-sm font-medium">MCP Servers</h3>
+        {connectedCount > 0 && (
           <Badge
-            variant={isPlaywrightConnected ? "default" : "secondary"}
-            className={`text-[9px] px-1.5 py-0 h-3.5 ml-auto ${
-              isPlaywrightConnected ? "bg-green-500/20 text-green-400 border-green-500/30" : ""
-            }`}
+            variant="default"
+            className="text-[9px] px-1.5 py-0 h-3.5 ml-auto bg-green-500/20 text-green-400 border-green-500/30"
           >
-            {isPlaywrightConnected ? "Connected" : "Disconnected"}
+            {connectedCount} connected
           </Badge>
         )}
       </div>
 
-      <div className="space-y-3">
-        <div>
-          <Label className="text-xs text-muted-foreground">Backend</Label>
-          <Select
-            value={config?.browserBackend || "none"}
-            onValueChange={handleToggle}
-          >
-            <SelectTrigger className="mt-1 text-sm h-8">
-              <SelectValue />
-            </SelectTrigger>
-            <SelectContent>
-              <SelectItem value="none">None (disabled)</SelectItem>
-              <SelectItem value="playwright-mcp">Playwright MCP</SelectItem>
-            </SelectContent>
-          </Select>
-        </div>
+      <p className="text-[10px] text-muted-foreground mb-3">
+        MCP servers extend the AI agent with new capabilities — browser automation, Microsoft 365 access, and more.
+      </p>
 
-        {isEnabled && (
-          <>
-            <div className="flex items-center gap-2">
-              {connecting ? (
-                <Button size="sm" variant="outline" className="h-7 text-xs" disabled>
-                  <Loader2 className="w-3 h-3 mr-1.5 animate-spin" />
-                  Connecting...
-                </Button>
-              ) : isPlaywrightConnected ? (
-                <Button size="sm" variant="outline" className="h-7 text-xs" onClick={handleReconnect}>
-                  <PlugZap className="w-3 h-3 mr-1.5" />
-                  Reconnect
-                </Button>
-              ) : (
-                <Button size="sm" variant="outline" className="h-7 text-xs" onClick={handleReconnect}>
-                  <Plug className="w-3 h-3 mr-1.5" />
-                  Connect
-                </Button>
-              )}
-            </div>
+      {/* Server list */}
+      <div className="space-y-2">
+        {allServerNames.length === 0 && (
+          <p className="text-xs text-muted-foreground italic py-2">No MCP servers configured.</p>
+        )}
 
-            {isPlaywrightConnected && playwrightTools.length > 0 && (
-              <div>
-                <Label className="text-[10px] text-muted-foreground mb-1 block">
-                  {playwrightTools.length} browser tools available
-                </Label>
-                <div className="flex flex-wrap gap-1">
-                  {playwrightTools.slice(0, 12).map((tool: string) => (
-                    <Badge key={tool} variant="secondary" className="text-[9px] font-mono px-1.5 py-0 h-3.5">
-                      {tool}
+        {allServerNames.map(name => {
+          const status = mcpStatus[name];
+          const isConnected = status?.connected === true;
+          const tools: string[] = status?.tools || [];
+          const label = status?.label || presets[name]?.label || name;
+          const description = status?.description || presets[name]?.description || "";
+          const setupNotes = status?.setupNotes || presets[name]?.setupNotes;
+          const isConnecting = connectingServer === name;
+
+          return (
+            <div key={name} className="border border-border/50 rounded-lg p-3">
+              <div className="flex items-center gap-2">
+                <div className="flex-1 min-w-0">
+                  <div className="flex items-center gap-2">
+                    <span className="text-xs font-medium">{label}</span>
+                    <Badge
+                      variant={isConnected ? "default" : "secondary"}
+                      className={`text-[9px] px-1.5 py-0 h-3.5 ${
+                        isConnected ? "bg-green-500/20 text-green-400 border-green-500/30" : ""
+                      }`}
+                    >
+                      {isConnected ? "Connected" : "Disconnected"}
                     </Badge>
-                  ))}
-                  {playwrightTools.length > 12 && (
-                    <Badge variant="secondary" className="text-[9px] px-1.5 py-0 h-3.5">
-                      +{playwrightTools.length - 12} more
-                    </Badge>
+                  </div>
+                  {description && (
+                    <p className="text-[10px] text-muted-foreground mt-0.5">{description}</p>
                   )}
                 </div>
+
+                <div className="flex items-center gap-1">
+                  {isConnecting ? (
+                    <Button size="sm" variant="ghost" className="h-6 w-6 p-0" disabled>
+                      <Loader2 className="w-3 h-3 animate-spin" />
+                    </Button>
+                  ) : isConnected ? (
+                    <>
+                      <Button
+                        size="sm"
+                        variant="ghost"
+                        className="h-6 w-6 p-0"
+                        onClick={() => handleReconnect(name)}
+                        title="Reconnect"
+                        data-testid={`button-reconnect-${name}`}
+                      >
+                        <RefreshCw className="w-3 h-3" />
+                      </Button>
+                      <Button
+                        size="sm"
+                        variant="ghost"
+                        className="h-6 w-6 p-0 text-muted-foreground hover:text-destructive"
+                        onClick={() => handleDisconnect(name)}
+                        title="Disconnect"
+                        data-testid={`button-disconnect-${name}`}
+                      >
+                        <PlugZap className="w-3 h-3" />
+                      </Button>
+                    </>
+                  ) : (
+                    <Button
+                      size="sm"
+                      variant="ghost"
+                      className="h-6 w-6 p-0"
+                      onClick={() => handleConnect(name)}
+                      title="Connect"
+                      data-testid={`button-connect-${name}`}
+                    >
+                      <Plug className="w-3 h-3" />
+                    </Button>
+                  )}
+                  <Button
+                    size="sm"
+                    variant="ghost"
+                    className="h-6 w-6 p-0 text-muted-foreground hover:text-destructive"
+                    onClick={() => handleRemove(name)}
+                    title="Remove server"
+                    data-testid={`button-remove-${name}`}
+                  >
+                    <Trash2 className="w-3 h-3" />
+                  </Button>
+                </div>
               </div>
-            )}
 
-            {!isPlaywrightConnected && !connecting && (
-              <p className="text-[10px] text-muted-foreground">
-                Make sure <code className="text-[10px] bg-muted px-1 rounded">@playwright/mcp</code> is installed:
-                <code className="text-[10px] bg-muted px-1 rounded ml-1">npm install -g @playwright/mcp</code>
-              </p>
-            )}
-          </>
-        )}
+              {/* Tools list */}
+              {isConnected && tools.length > 0 && (
+                <div className="mt-2">
+                  <Label className="text-[10px] text-muted-foreground mb-1 block">
+                    {tools.length} tools available
+                  </Label>
+                  <div className="flex flex-wrap gap-1">
+                    {tools.slice(0, 10).map((tool: string) => (
+                      <Badge key={tool} variant="secondary" className="text-[9px] font-mono px-1.5 py-0 h-3.5">
+                        {tool}
+                      </Badge>
+                    ))}
+                    {tools.length > 10 && (
+                      <Badge variant="secondary" className="text-[9px] px-1.5 py-0 h-3.5">
+                        +{tools.length - 10} more
+                      </Badge>
+                    )}
+                  </div>
+                </div>
+              )}
 
-        {!isEnabled && (
-          <p className="text-[10px] text-muted-foreground">
-            Enable Playwright MCP to let the AI agent browse websites, fill forms, and interact with web pages.
-          </p>
-        )}
+              {/* Setup notes for disconnected servers */}
+              {!isConnected && setupNotes && (
+                <div className="mt-2 flex items-start gap-1.5">
+                  <AlertCircle className="w-3 h-3 text-muted-foreground mt-0.5 shrink-0" />
+                  <p className="text-[10px] text-muted-foreground">{setupNotes}</p>
+                </div>
+              )}
+            </div>
+          );
+        })}
       </div>
+
+      {/* Add server */}
+      {!showAddDialog ? (
+        <Button
+          size="sm"
+          variant="outline"
+          className="h-7 text-xs mt-3 w-full"
+          onClick={() => setShowAddDialog(true)}
+          data-testid="button-add-mcp-server"
+        >
+          <Plus className="w-3 h-3 mr-1.5" />
+          Add MCP Server
+        </Button>
+      ) : (
+        <div className="mt-3 border border-border/50 rounded-lg p-3 space-y-3">
+          <div className="flex items-center justify-between">
+            <Label className="text-xs font-medium">Add MCP Server</Label>
+            <Button
+              size="sm"
+              variant="ghost"
+              className="h-5 text-[10px] px-2"
+              onClick={() => setShowAddDialog(false)}
+            >
+              Cancel
+            </Button>
+          </div>
+
+          {/* Preset buttons */}
+          {availablePresets.length > 0 && (
+            <div>
+              <Label className="text-[10px] text-muted-foreground mb-1.5 block">Quick Add (Presets)</Label>
+              <div className="space-y-1.5">
+                {availablePresets.map(([name, preset]: [string, any]) => (
+                  <button
+                    key={name}
+                    className="w-full text-left p-2 border border-border/50 rounded-md hover:bg-muted/50 transition-colors"
+                    onClick={() => handleAddPreset(name)}
+                    data-testid={`button-add-preset-${name}`}
+                  >
+                    <div className="text-xs font-medium">{preset.label}</div>
+                    <div className="text-[10px] text-muted-foreground">{preset.description}</div>
+                  </button>
+                ))}
+              </div>
+            </div>
+          )}
+
+          {/* Custom server form */}
+          <div>
+            <Label className="text-[10px] text-muted-foreground mb-1.5 block">
+              {availablePresets.length > 0 ? "Or add custom" : "Custom Server"}
+            </Label>
+            <div className="space-y-2">
+              <Input
+                className="text-xs h-7 font-mono"
+                placeholder="Server name (e.g. my-mcp-server)"
+                value={customName}
+                onChange={(e) => setCustomName(e.target.value)}
+                data-testid="input-custom-mcp-name"
+              />
+              <Input
+                className="text-xs h-7 font-mono"
+                placeholder="Command (e.g. npx)"
+                value={customCommand}
+                onChange={(e) => setCustomCommand(e.target.value)}
+                data-testid="input-custom-mcp-command"
+              />
+              <Input
+                className="text-xs h-7 font-mono"
+                placeholder="Args (space-separated, e.g. -y @my/package mcp)"
+                value={customArgs}
+                onChange={(e) => setCustomArgs(e.target.value)}
+                data-testid="input-custom-mcp-args"
+              />
+              <Button
+                size="sm"
+                variant="outline"
+                className="h-7 text-xs"
+                onClick={handleAddCustom}
+                disabled={!customName.trim() || !customCommand.trim()}
+                data-testid="button-add-custom-mcp"
+              >
+                <Terminal className="w-3 h-3 mr-1.5" />
+                Add Custom Server
+              </Button>
+            </div>
+          </div>
+        </div>
+      )}
     </Card>
   );
 }

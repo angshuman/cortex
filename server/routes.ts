@@ -265,10 +265,10 @@ export function registerRoutes(server: Server, app: Express) {
   app.patch("/api/config", async (req, res) => {
     const config = vaultManager.saveConfig(req.body);
     
-    // If browser backend changed, re-init MCP
-    if (req.body.browserBackend !== undefined) {
+    // If browser backend or MCP servers changed, re-init
+    if (req.body.browserBackend !== undefined || req.body.mcpServers !== undefined) {
       try {
-        await mcpManager.initPlaywright(config, false);
+        await mcpManager.initFromConfig(config, false);
       } catch (e) {
         console.error("[MCP] Failed to re-init after config change:", e);
       }
@@ -277,16 +277,44 @@ export function registerRoutes(server: Server, app: Express) {
     res.json(config);
   });
 
-  // ============ MCP STATUS ============
+  // ============ MCP SERVERS ============
+  // Get status of all MCP servers (connected + configured)
   app.get("/api/mcp/status", (_req, res) => {
-    res.json(mcpManager.getStatus());
+    const config = vaultManager.getConfig();
+    res.json(mcpManager.getStatus(config));
   });
 
+  // Get available presets (known MCP server templates)
+  app.get("/api/mcp/presets", (_req, res) => {
+    res.json(mcpManager.getPresets());
+  });
+
+  // Connect a specific MCP server by name
+  app.post("/api/mcp/connect/:name", async (req, res) => {
+    const serverName = req.params.name as string;
+    const config = vaultManager.getConfig();
+    try {
+      const ok = await mcpManager.connectServer(serverName, config, false);
+      res.json({ connected: ok, status: mcpManager.getStatus(config) });
+    } catch (err: any) {
+      res.status(500).json({ error: err.message, connected: false });
+    }
+  });
+
+  // Disconnect a specific MCP server by name
+  app.post("/api/mcp/disconnect/:name", async (req, res) => {
+    const serverName = req.params.name as string;
+    await mcpManager.disconnect(serverName);
+    const config = vaultManager.getConfig();
+    res.json({ connected: false, status: mcpManager.getStatus(config) });
+  });
+
+  // Legacy connect/disconnect endpoints (backward compat)
   app.post("/api/mcp/connect", async (_req, res) => {
     const config = vaultManager.getConfig();
     try {
       const ok = await mcpManager.initPlaywright(config, false);
-      res.json({ connected: ok, status: mcpManager.getStatus() });
+      res.json({ connected: ok, status: mcpManager.getStatus(config) });
     } catch (err: any) {
       res.status(500).json({ error: err.message, connected: false });
     }
@@ -295,6 +323,43 @@ export function registerRoutes(server: Server, app: Express) {
   app.post("/api/mcp/disconnect", async (_req, res) => {
     await mcpManager.disconnect("playwright");
     res.json({ connected: false });
+  });
+
+  // Add an MCP server to config (from preset or custom)
+  app.post("/api/mcp/servers", async (req, res) => {
+    const { name, command, args, env } = req.body;
+    if (!name) return res.status(400).json({ error: "Server name is required" });
+    const config = vaultManager.getConfig();
+    const mcpServers = { ...config.mcpServers };
+    
+    if (command) {
+      // Custom server config
+      mcpServers[name] = { command, args: args || [], env };
+    } else {
+      // Use preset defaults — store minimal config to mark it as "enabled"
+      const { MCP_PRESETS } = await import("./mcp-client");
+      const preset = MCP_PRESETS[name];
+      if (preset) {
+        mcpServers[name] = { command: preset.command, args: preset.args, env: preset.env };
+      } else {
+        return res.status(400).json({ error: `Unknown preset: ${name}. Provide command + args for custom servers.` });
+      }
+    }
+
+    const updated = vaultManager.saveConfig({ mcpServers });
+    res.json({ config: updated, status: mcpManager.getStatus(updated) });
+  });
+
+  // Remove an MCP server from config
+  app.delete("/api/mcp/servers/:name", async (req, res) => {
+    const serverName = req.params.name as string;
+    // Disconnect first
+    await mcpManager.disconnect(serverName);
+    const config = vaultManager.getConfig();
+    const mcpServers = { ...config.mcpServers };
+    delete mcpServers[serverName];
+    const updated = vaultManager.saveConfig({ mcpServers });
+    res.json({ config: updated, status: mcpManager.getStatus(updated) });
   });
 
   // ============ SEARCH (vault-scoped) ============
@@ -315,16 +380,19 @@ export function registerRoutes(server: Server, app: Express) {
   });
 
   // ============ AUTO-INIT MCP ============
-  // Start Playwright MCP if configured
+  // Initialize all configured MCP servers at startup
   const config = vaultManager.getConfig();
-  if (config.browserBackend === "playwright-mcp") {
-    mcpManager.initPlaywright(config, false).then(ok => {
-      if (ok) console.log("[MCP] Playwright browser ready");
-      else console.log("[MCP] Playwright browser failed to start — check that @playwright/mcp is installed");
-    }).catch(err => {
-      console.error("[MCP] Auto-init failed:", err.message);
-    });
-  }
+  mcpManager.initFromConfig(config, false).then(() => {
+    const status = mcpManager.getStatus(config);
+    const connected = Object.entries(status).filter(([, s]) => s.connected).map(([n]) => n);
+    if (connected.length > 0) {
+      console.log(`[MCP] Servers ready: ${connected.join(", ")}`);
+    } else {
+      console.log("[MCP] No MCP servers connected (configure in Settings > General)");
+    }
+  }).catch(err => {
+    console.error("[MCP] Auto-init failed:", err.message);
+  });
 
   // ============ WEBSOCKET ============
   const wss = new WebSocketServer({ server, path: "/ws" });
@@ -368,14 +436,12 @@ export function registerRoutes(server: Server, app: Express) {
           const store = vaultManager.getStorage(resolvedVaultId);
           const vaultSettings = vaultManager.getVaultSettings(resolvedVaultId);
 
-          // Ensure MCP is connected if browser backend is enabled
+          // Ensure all configured MCP servers are connected
           const globalConfig = vaultManager.getConfig();
-          if (globalConfig.browserBackend === "playwright-mcp" && !mcpManager.isConnected("playwright")) {
-            const headless = vaultSettings?.browserHeadless ?? false;
-            mcpManager.initPlaywright(globalConfig, headless).catch(err => {
-              console.error("[MCP] Auto-connect on chat failed:", err.message);
-            });
-          }
+          const headless = vaultSettings?.browserHeadless ?? false;
+          mcpManager.initFromConfig(globalConfig, headless).catch(err => {
+            console.error("[MCP] Auto-connect on chat failed:", err.message);
+          });
 
           const context: ContextItem[] = data.context || [];
           const agentSettings = globalConfig.agent || undefined;
