@@ -1,12 +1,23 @@
 import { z } from "zod";
 
 // ============ VAULTS ============
+export const vaultSettingsSchema = z.object({
+  /** Absolute folder path on disk. If set, vault data lives here instead of .cortex-data/vaults/<slug>/ */
+  folderPath: z.string().nullable().default(null),
+  /** Whether the browser runs headless (no visible window). Default false = show browser UI. */
+  browserHeadless: z.boolean().default(false),
+  /** AI model override for this vault (uses global default if empty) */
+  aiModel: z.string().nullable().default(null),
+});
+export type VaultSettings = z.infer<typeof vaultSettingsSchema>;
+
 export const vaultSchema = z.object({
   id: z.string(),
   name: z.string(),
   slug: z.string(),
   icon: z.string().default("📁"),
   color: z.string().default("#6366f1"),
+  settings: vaultSettingsSchema.default({}),
   createdAt: z.string(),
   updatedAt: z.string(),
 });
@@ -15,6 +26,7 @@ export const insertVaultSchema = z.object({
   name: z.string(),
   icon: z.string().optional(),
   color: z.string().optional(),
+  settings: vaultSettingsSchema.partial().optional(),
 });
 export type InsertVault = z.infer<typeof insertVaultSchema>;
 

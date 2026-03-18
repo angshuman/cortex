@@ -1,7 +1,7 @@
 import fs from "fs";
 import path from "path";
 import { v4 as uuid } from "uuid";
-import type { Note, InsertNote, Task, InsertTask, ChatSession, ChatEvent, Skill, Config, SearchResult, Vault, InsertVault } from "@shared/schema";
+import type { Note, InsertNote, Task, InsertTask, ChatSession, ChatEvent, Skill, Config, SearchResult, Vault, InsertVault, VaultSettings } from "@shared/schema";
 
 const DEFAULT_DATA_DIR = path.join(process.cwd(), ".cortex-data");
 
@@ -551,12 +551,19 @@ export class VaultManager {
     }
     slug = candidateSlug;
 
+    const settings: VaultSettings = {
+      folderPath: input.settings?.folderPath ?? null,
+      browserHeadless: input.settings?.browserHeadless ?? false,
+      aiModel: input.settings?.aiModel ?? null,
+    };
+
     const vault: Vault = {
       id: uuid(),
       name: input.name,
       slug,
       icon: input.icon || "\ud83d\udcc1",
       color: input.color || "#6366f1",
+      settings,
       createdAt: now,
       updatedAt: now,
     };
@@ -565,20 +572,27 @@ export class VaultManager {
     this.saveVaultsIndex(existing);
 
     // Create the vault directory and initialize storage
-    const vaultDir = path.join(this.vaultsDir, slug);
+    const vaultDir = this.resolveVaultDir(vault);
     ensureDir(vaultDir);
     this.getStorage(vault.id); // triggers init
 
     return vault;
   }
 
-  updateVault(id: string, updates: Partial<Pick<Vault, "name" | "icon" | "color">>): Vault | undefined {
+  updateVault(id: string, updates: Partial<Pick<Vault, "name" | "icon" | "color" | "settings">>): Vault | undefined {
     const vaults = this.getVaultsIndex();
     const idx = vaults.findIndex(v => v.id === id);
     if (idx === -1) return undefined;
 
     const oldSlug = vaults[idx].slug;
     let newSlug = oldSlug;
+
+    // If the external folderPath is changing, clear cached storage
+    const oldFolderPath = vaults[idx].settings?.folderPath;
+    const newFolderPath = updates.settings?.folderPath;
+    if (newFolderPath !== undefined && newFolderPath !== oldFolderPath) {
+      this.storageCache.delete(id);
+    }
 
     if (updates.name && updates.name !== vaults[idx].name) {
       newSlug = slugify(updates.name);
@@ -590,20 +604,28 @@ export class VaultManager {
       }
       newSlug = candidateSlug;
 
-      // Rename folder on disk
-      const oldDir = path.join(this.vaultsDir, oldSlug);
-      const newDir = path.join(this.vaultsDir, newSlug);
-      if (fs.existsSync(oldDir) && oldDir !== newDir) {
-        fs.renameSync(oldDir, newDir);
+      // Rename folder on disk (only if using default vault dir, not external path)
+      if (!oldFolderPath) {
+        const oldDir = path.join(this.vaultsDir, oldSlug);
+        const newDir = path.join(this.vaultsDir, newSlug);
+        if (fs.existsSync(oldDir) && oldDir !== newDir) {
+          fs.renameSync(oldDir, newDir);
+        }
       }
 
       // Clear cached storage for old slug
       this.storageCache.delete(id);
     }
 
+    // Merge settings (don't overwrite entire settings if only updating one field)
+    const mergedSettings = updates.settings
+      ? { ...(vaults[idx].settings || { folderPath: null, browserHeadless: false, aiModel: null }), ...updates.settings }
+      : vaults[idx].settings;
+
     vaults[idx] = {
       ...vaults[idx],
       ...updates,
+      settings: mergedSettings,
       slug: newSlug,
       updatedAt: new Date().toISOString(),
     };
@@ -627,6 +649,19 @@ export class VaultManager {
   }
 
   // ============ STORAGE ACCESS ============
+
+  /**
+   * Resolve the filesystem directory for a vault.
+   * If vault has a folderPath in settings, use that external path.
+   * Otherwise fall back to .cortex-data/vaults/<slug>/
+   */
+  private resolveVaultDir(vault: Vault): string {
+    if (vault.settings?.folderPath) {
+      return vault.settings.folderPath;
+    }
+    return path.join(this.vaultsDir, vault.slug);
+  }
+
   getStorage(vaultId: string): FileStorage {
     if (this.storageCache.has(vaultId)) {
       return this.storageCache.get(vaultId)!;
@@ -642,10 +677,17 @@ export class VaultManager {
       throw new Error("No vaults exist");
     }
 
-    const vaultDir = path.join(this.vaultsDir, vault.slug);
+    const vaultDir = this.resolveVaultDir(vault);
     const storage = new FileStorage(vaultDir);
     this.storageCache.set(vaultId, storage);
     return storage;
+  }
+
+  /** Get settings for a specific vault */
+  getVaultSettings(vaultId: string): VaultSettings {
+    const vault = this.getVault(vaultId);
+    if (!vault) return { folderPath: null, browserHeadless: false, aiModel: null };
+    return vault.settings || { folderPath: null, browserHeadless: false, aiModel: null };
   }
 
   getDefaultVault(): Vault {
@@ -705,6 +747,7 @@ export class VaultManager {
       slug: "personal",
       icon: "\ud83c\udfe0",
       color: "#6366f1",
+      settings: { folderPath: null, browserHeadless: false, aiModel: null },
       createdAt: now,
       updatedAt: now,
     };

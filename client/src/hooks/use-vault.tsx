@@ -2,12 +2,19 @@ import { createContext, useContext, useState, useEffect, useCallback } from "rea
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { apiRequest } from "@/lib/queryClient";
 
+export interface VaultSettings {
+  folderPath: string | null;
+  browserHeadless: boolean;
+  aiModel: string | null;
+}
+
 export interface Vault {
   id: string;
   name: string;
   slug: string;
   icon: string;
   color: string;
+  settings: VaultSettings;
   createdAt: string;
   updatedAt: string;
 }

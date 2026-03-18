@@ -1,7 +1,7 @@
 import { useState, useEffect } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { apiRequest, withVault } from "@/lib/queryClient";
-import { useVault } from "@/hooks/use-vault";
+import { useVault, type Vault, type VaultSettings } from "@/hooks/use-vault";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Badge } from "@/components/ui/badge";
@@ -27,6 +27,12 @@ import {
   Shield,
   Wrench,
   Info,
+  Monitor,
+  Eye,
+  EyeOff,
+  Vault as VaultIcon,
+  ChevronRight,
+  Check,
 } from "lucide-react";
 import { useToast } from "@/hooks/use-toast";
 
@@ -42,7 +48,7 @@ interface Skill {
 export default function SettingsPage() {
   const { toast } = useToast();
   const queryClient = useQueryClient();
-  const { vaultParam, vaultId } = useVault();
+  const { vaults, activeVault, vaultParam, vaultId, refetchVaults } = useVault();
 
   const { data: config } = useQuery({
     queryKey: ["/api/config"],
@@ -85,13 +91,33 @@ export default function SettingsPage() {
 
       <ScrollArea className="flex-1">
         <div className="max-w-2xl mx-auto px-4 py-6">
-          <Tabs defaultValue="general">
+          <Tabs defaultValue="vaults">
             <TabsList className="mb-6">
+              <TabsTrigger value="vaults" className="text-xs">Vaults</TabsTrigger>
               <TabsTrigger value="general" className="text-xs">General</TabsTrigger>
               <TabsTrigger value="skills" className="text-xs">Skills</TabsTrigger>
               <TabsTrigger value="about" className="text-xs">About</TabsTrigger>
             </TabsList>
 
+            {/* ====== VAULTS TAB ====== */}
+            <TabsContent value="vaults" className="space-y-4">
+              <p className="text-xs text-muted-foreground mb-2">
+                Each vault is an independent workspace with its own notes, tasks, chats, and settings. Vaults map to folders on disk — you can point them anywhere.
+              </p>
+              {vaults.map(vault => (
+                <VaultSettingsCard
+                  key={vault.id}
+                  vault={vault}
+                  isActive={vault.id === activeVault?.id}
+                  onUpdated={() => {
+                    refetchVaults();
+                    queryClient.invalidateQueries({ queryKey: ["/api/vaults"] });
+                  }}
+                />
+              ))}
+            </TabsContent>
+
+            {/* ====== GENERAL TAB ====== */}
             <TabsContent value="general" className="space-y-6">
               {/* AI Provider */}
               <Card className="p-4">
@@ -150,7 +176,7 @@ export default function SettingsPage() {
               <Card className="p-4">
                 <div className="flex items-center gap-2 mb-3">
                   <Shield className="w-4 h-4 text-primary" />
-                  <h3 className="text-sm font-medium">Browser</h3>
+                  <h3 className="text-sm font-medium">Browser Backend</h3>
                 </div>
                 <div>
                   <Label className="text-xs text-muted-foreground">Browser Backend</Label>
@@ -179,22 +205,24 @@ export default function SettingsPage() {
                   <h3 className="text-sm font-medium">Storage</h3>
                 </div>
                 <div>
-                  <Label className="text-xs text-muted-foreground">Data Directory</Label>
+                  <Label className="text-xs text-muted-foreground">Data Root Directory</Label>
                   <div className="flex items-center gap-2 mt-1">
                     <code className="text-xs bg-muted px-2 py-1 rounded font-mono">
                       {info?.dataDir || "~/.cortex-data"}
                     </code>
                   </div>
                   <p className="text-[10px] text-muted-foreground mt-1">
-                    Set CORTEX_DATA_DIR env variable to change. Sync this folder with OneDrive, Google Drive, or USB.
+                    Set CORTEX_DATA_DIR env variable to change. Individual vaults can override this with custom folder paths.
                   </p>
                 </div>
               </Card>
             </TabsContent>
 
+            {/* ====== SKILLS TAB ====== */}
             <TabsContent value="skills" className="space-y-3">
               <p className="text-xs text-muted-foreground mb-4">
                 Skills extend what the AI agent can do. Built-in skills are always available. You can add custom skills later.
+                {activeVault && <span className="ml-1 font-medium">Showing skills for {activeVault.icon} {activeVault.name}.</span>}
               </p>
               {skills.map(skill => (
                 <Card key={skill.name} className="p-3">
@@ -227,6 +255,7 @@ export default function SettingsPage() {
               ))}
             </TabsContent>
 
+            {/* ====== ABOUT TAB ====== */}
             <TabsContent value="about" className="space-y-4">
               <Card className="p-4">
                 <div className="flex items-center gap-3 mb-3">
@@ -241,7 +270,7 @@ export default function SettingsPage() {
                 <div className="space-y-2 text-xs text-muted-foreground">
                   <p>Version: {info?.version || "1.0.0"}</p>
                   <p>Data: All stored as plain JSON and Markdown files on your filesystem.</p>
-                  <p>Sync: Copy the data directory to OneDrive, Google Drive, or USB for portability.</p>
+                  <p>Sync: Copy vault folders to OneDrive, Google Drive, or USB for portability.</p>
                   <p>Privacy: Everything runs locally. AI calls go directly to your configured provider.</p>
                 </div>
               </Card>
@@ -250,5 +279,173 @@ export default function SettingsPage() {
         </div>
       </ScrollArea>
     </div>
+  );
+}
+
+/** Individual vault settings card */
+function VaultSettingsCard({
+  vault,
+  isActive,
+  onUpdated,
+}: {
+  vault: Vault;
+  isActive: boolean;
+  onUpdated: () => void;
+}) {
+  const { toast } = useToast();
+  const [folderPath, setFolderPath] = useState(vault.settings?.folderPath || "");
+  const [browserHeadless, setBrowserHeadless] = useState(vault.settings?.browserHeadless ?? false);
+  const [aiModel, setAiModel] = useState(vault.settings?.aiModel || "");
+  const [saving, setSaving] = useState(false);
+
+  // Fetch resolved path (actual disk location)
+  const { data: pathInfo } = useQuery({
+    queryKey: ["/api/vaults", vault.id, "path"],
+    queryFn: () => apiRequest("GET", `/api/vaults/${vault.id}/path`).then(r => r.json()),
+  });
+
+  // Sync local state when vault prop changes
+  useEffect(() => {
+    setFolderPath(vault.settings?.folderPath || "");
+    setBrowserHeadless(vault.settings?.browserHeadless ?? false);
+    setAiModel(vault.settings?.aiModel || "");
+  }, [vault]);
+
+  const saveSettings = async (updates: Partial<VaultSettings>) => {
+    setSaving(true);
+    try {
+      await apiRequest("PATCH", `/api/vaults/${vault.id}/settings`, updates);
+      onUpdated();
+      toast({ title: "Vault settings saved" });
+    } catch (err: any) {
+      toast({ title: "Error", description: err.message, variant: "destructive" });
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  const handleToggleHeadless = async (checked: boolean) => {
+    setBrowserHeadless(checked);
+    await saveSettings({ browserHeadless: checked });
+  };
+
+  const handleSaveFolderPath = async () => {
+    const value = folderPath.trim() || null;
+    await saveSettings({ folderPath: value });
+  };
+
+  const handleSaveAiModel = async () => {
+    const value = aiModel.trim() || null;
+    await saveSettings({ aiModel: value });
+  };
+
+  return (
+    <Card className={`p-4 ${isActive ? "ring-1 ring-primary/30" : ""}`}>
+      <div className="flex items-center gap-2.5 mb-4">
+        <span className="text-lg">{vault.icon}</span>
+        <div className="flex-1 min-w-0">
+          <div className="flex items-center gap-2">
+            <span className="text-sm font-medium">{vault.name}</span>
+            {isActive && (
+              <Badge variant="secondary" className="text-[9px] px-1.5 py-0 h-3.5">Active</Badge>
+            )}
+          </div>
+          <p className="text-[10px] text-muted-foreground font-mono truncate mt-0.5">
+            {pathInfo?.path || "loading..."}
+          </p>
+        </div>
+      </div>
+
+      <div className="space-y-4">
+        {/* Folder Path */}
+        <div>
+          <Label className="text-xs text-muted-foreground flex items-center gap-1.5 mb-1.5">
+            <FolderOpen className="w-3 h-3" />
+            Data Folder
+          </Label>
+          <div className="flex gap-2">
+            <Input
+              className="text-xs h-8 font-mono flex-1"
+              placeholder="Default (inside .cortex-data)"
+              value={folderPath}
+              onChange={(e) => setFolderPath(e.target.value)}
+              onKeyDown={(e) => { if (e.key === "Enter") handleSaveFolderPath(); }}
+              data-testid={`input-vault-folder-${vault.slug}`}
+            />
+            <Button
+              size="sm"
+              variant="outline"
+              className="h-8 text-xs px-3"
+              onClick={handleSaveFolderPath}
+              disabled={saving}
+              data-testid={`button-save-folder-${vault.slug}`}
+            >
+              {saving ? "..." : "Save"}
+            </Button>
+          </div>
+          <p className="text-[10px] text-muted-foreground mt-1">
+            Absolute path to an external folder (e.g. D:\CortexVaults\work or ~/Google Drive/cortex-work). Leave empty for default location.
+          </p>
+        </div>
+
+        {/* Browser Headless */}
+        <div className="flex items-center justify-between">
+          <div>
+            <Label className="text-xs flex items-center gap-1.5">
+              <Monitor className="w-3 h-3 text-muted-foreground" />
+              Browser Headless Mode
+            </Label>
+            <p className="text-[10px] text-muted-foreground mt-0.5">
+              {browserHeadless
+                ? "Browser runs invisibly in the background"
+                : "Browser window will be visible when browsing"}
+            </p>
+          </div>
+          <div className="flex items-center gap-2">
+            {browserHeadless ? (
+              <EyeOff className="w-3.5 h-3.5 text-muted-foreground" />
+            ) : (
+              <Eye className="w-3.5 h-3.5 text-primary" />
+            )}
+            <Switch
+              checked={browserHeadless}
+              onCheckedChange={handleToggleHeadless}
+              data-testid={`switch-headless-${vault.slug}`}
+            />
+          </div>
+        </div>
+
+        {/* AI Model Override */}
+        <div>
+          <Label className="text-xs text-muted-foreground flex items-center gap-1.5 mb-1.5">
+            <Brain className="w-3 h-3" />
+            AI Model Override
+          </Label>
+          <div className="flex gap-2">
+            <Input
+              className="text-xs h-8 font-mono flex-1"
+              placeholder="Use global default"
+              value={aiModel}
+              onChange={(e) => setAiModel(e.target.value)}
+              onKeyDown={(e) => { if (e.key === "Enter") handleSaveAiModel(); }}
+              data-testid={`input-vault-model-${vault.slug}`}
+            />
+            <Button
+              size="sm"
+              variant="outline"
+              className="h-8 text-xs px-3"
+              onClick={handleSaveAiModel}
+              disabled={saving}
+              data-testid={`button-save-model-${vault.slug}`}
+            >
+              {saving ? "..." : "Save"}
+            </Button>
+          </div>
+          <p className="text-[10px] text-muted-foreground mt-1">
+            Override the AI model for this vault only (e.g. claude-sonnet-4-20250514, gpt-4o).
+          </p>
+        </div>
+      </div>
+    </Card>
   );
 }

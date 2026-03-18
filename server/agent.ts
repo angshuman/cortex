@@ -3,7 +3,7 @@ import OpenAI from "openai";
 import fs from "fs";
 import { v4 as uuid } from "uuid";
 import { FileStorage } from "./storage";
-import type { ChatEvent, Skill } from "@shared/schema";
+import type { ChatEvent, Skill, VaultSettings } from "@shared/schema";
 
 type EventCallback = (event: ChatEvent) => void;
 
@@ -174,7 +174,7 @@ async function executeTool(name: string, args: Record<string, any>, storage: Fil
       case "browser_click":
       case "browser_type":
       case "browser_snapshot":
-        return JSON.stringify({ info: "Browser MCP available when Playwright MCP server is configured." });
+        return JSON.stringify({ info: "Browser MCP available when Playwright MCP server is configured. Browser headless mode can be changed in vault settings." });
       default:
         return JSON.stringify({ error: `Unknown tool: ${name}` });
     }
@@ -269,7 +269,7 @@ function messagesToOpenAI(messages: AgentMessage[], systemPrompt: string, storag
   return result;
 }
 
-function buildSystemPrompt(storage: FileStorage): string {
+function buildSystemPrompt(storage: FileStorage, vaultSettings?: VaultSettings): string {
   const skills = storage.getSkills().filter((s: Skill) => s.enabled);
   const skillInstructions = skills.map((s: Skill) => s.instructions).filter(Boolean).join("\n\n");
   const notes = storage.getNotes();
@@ -281,12 +281,14 @@ function buildSystemPrompt(storage: FileStorage): string {
     ? `Notes available:\n${notes.slice(0, 15).map((n: any) => `- "${n.title}" in ${n.folder}`).join("\n")}`
     : "No notes yet.";
 
+  const browserMode = vaultSettings?.browserHeadless ? "headless (no visible window)" : "visible (browser window will open)";
+
   return `You are Cortex, a personal AI operating system assistant. You are a reasoner, planner, and note-taker.
 
 ## Your Capabilities
 - Create, read, update, and organize notes (markdown with image support)
 - Create, manage, and track tasks and subtasks
-- Browse the web using browser tools (when MCP is configured)
+- Browse the web using browser tools (when MCP is configured) — browser runs in ${browserMode} mode
 - Search across all notes, tasks, and conversations
 - Plan and reason through complex problems step by step
 - **Vision**: You can see and analyze images pasted into chat
@@ -334,11 +336,13 @@ export class Agent {
   private maxSteps = 10;
   private context: ContextItem[] = [];
   private storage: FileStorage;
+  private vaultSettings: VaultSettings;
 
-  constructor(sessionId: string, onEvent: EventCallback, context?: ContextItem[], storage?: FileStorage) {
+  constructor(sessionId: string, onEvent: EventCallback, context?: ContextItem[], storage?: FileStorage, vaultSettings?: VaultSettings) {
     this.sessionId = sessionId;
     this.onEvent = onEvent;
     this.context = context || [];
+    this.vaultSettings = vaultSettings || { folderPath: null, browserHeadless: false, aiModel: null };
     // Use provided vault-scoped storage, or import the default
     this.storage = storage || require("./storage").storage;
     // Rebuild conversation history from persisted session events
@@ -440,7 +444,7 @@ export class Agent {
       return;
     }
 
-    let systemPrompt = buildSystemPrompt(this.storage);
+    let systemPrompt = buildSystemPrompt(this.storage, this.vaultSettings);
 
     // Inject context items into system prompt
     if (this.context.length > 0) {

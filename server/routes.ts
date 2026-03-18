@@ -46,6 +46,31 @@ export function registerRoutes(server: Server, app: Express) {
     res.json(vault);
   });
 
+  // Vault settings (convenience endpoint)
+  app.get("/api/vaults/:id/settings", (req, res) => {
+    const vault = vaultManager.getVault(req.params.id as string);
+    if (!vault) return res.status(404).json({ error: "Vault not found" });
+    res.json(vault.settings || { folderPath: null, browserHeadless: false, aiModel: null });
+  });
+
+  app.patch("/api/vaults/:id/settings", (req, res) => {
+    const vault = vaultManager.updateVault(req.params.id as string, { settings: req.body });
+    if (!vault) return res.status(404).json({ error: "Vault not found" });
+    res.json(vault.settings);
+  });
+
+  // Resolve vault data directory (for display in UI)
+  app.get("/api/vaults/:id/path", (req, res) => {
+    const vault = vaultManager.getVault(req.params.id as string);
+    if (!vault) return res.status(404).json({ error: "Vault not found" });
+    try {
+      const storage = vaultManager.getStorage(vault.id);
+      res.json({ path: storage.getDataDir() });
+    } catch (err: any) {
+      res.status(500).json({ error: err.message });
+    }
+  });
+
   app.delete("/api/vaults/:id", (req, res) => {
     const ok = vaultManager.deleteVault(req.params.id as string);
     if (!ok) return res.status(400).json({ error: "Cannot delete vault (last vault or not found)" });
@@ -295,13 +320,13 @@ export function registerRoutes(server: Server, app: Express) {
             }
           };
 
-          // Resolve vault storage for the agent
-          const store = vaultId
-            ? vaultManager.getStorage(vaultId)
-            : vaultManager.getStorage(vaultManager.getDefaultVault().id);
+          // Resolve vault storage and settings for the agent
+          const resolvedVaultId = vaultId || vaultManager.getDefaultVault().id;
+          const store = vaultManager.getStorage(resolvedVaultId);
+          const vaultSettings = vaultManager.getVaultSettings(resolvedVaultId);
 
           const context: ContextItem[] = data.context || [];
-          const agent = new Agent(sessionId, (event) => broadcast(event), context, store);
+          const agent = new Agent(sessionId, (event) => broadcast(event), context, store, vaultSettings);
 
           if (!activeAgents.has(sessionId)) {
             activeAgents.set(sessionId, { agent, ws: new Set([ws]) });
