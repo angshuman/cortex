@@ -35,23 +35,47 @@ A local-first personal operating system with an AI reasoner, note-taking, task m
 ## Quick Start
 
 ```bash
-# Clone
 git clone https://github.com/angshuman/cortex.git
 cd cortex
-
-# Install
 npm install
+```
 
-# Set at least one AI provider key
+Set at least one AI provider key, then run:
+
+### macOS / Linux / Git Bash
+
+```bash
 export ANTHROPIC_API_KEY=sk-ant-...
 # or: export OPENAI_API_KEY=sk-...
 # or: export GROK_API_KEY=xai-...
 
-# Run
 npm run dev
-
-# Open http://localhost:5000
 ```
+
+### Windows PowerShell
+
+```powershell
+$env:ANTHROPIC_API_KEY = "sk-ant-..."
+# or: $env:OPENAI_API_KEY = "sk-..."
+# or: $env:GROK_API_KEY = "xai-..."
+
+npm run dev
+```
+
+### Windows CMD
+
+```cmd
+set ANTHROPIC_API_KEY=sk-ant-...
+npm run dev
+```
+
+Open [http://localhost:5000](http://localhost:5000)
+
+> **Tip:** Create a `.env` file in the project root for persistent config (works on all platforms):
+> ```
+> ANTHROPIC_API_KEY=sk-ant-...
+> CORTEX_DATA_DIR=C:\Users\you\OneDrive\cortex-data
+> ```
 
 ## Configuration
 
