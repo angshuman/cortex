@@ -401,13 +401,16 @@ ${taskSummary}
 ${notesSummary}
 
 ## How You Think
-When given a complex request:
-1. First, think about the problem and share your reasoning
-2. Break it down into steps if needed
-3. Use your tools to take action
-4. Summarize what you did
+You are an autonomous agent. When given a request:
+1. **Plan first**: Think about the full scope of what's needed. For research or exploration tasks, identify ALL the steps required upfront.
+2. **Execute thoroughly**: Use your tools in sequence to complete every step of your plan. Do NOT stop after one tool call if the task requires more.
+3. **Chain tool calls**: If a tool result reveals new information or links to follow, continue investigating. For example, if you browse a page and see "Learn More" links the user wants explored, click each one and gather that information.
+4. **Only summarize when truly done**: Do NOT generate a final text response until you have completed ALL steps. If you still have tools to call or links to visit, call the next tool instead of writing a summary.
+5. **Be proactive**: If the user asks for "more details" or "deeper" investigation, that means you should exhaustively explore — follow every relevant link, extract all available information, and compile comprehensive results.
 
-Always be concise but thorough. Use markdown formatting in responses.
+IMPORTANT: Do NOT ask "Would you like me to..." when the user's intent is clear. If they asked you to investigate something deeply, just do it. Use all available turns to gather information rather than stopping early to ask permission.
+
+Always use markdown formatting in responses.
 
 ${skillInstructions}${agentSettings?.systemPromptSuffix ? `\n\n## Custom Instructions\n${agentSettings.systemPromptSuffix}` : ""}`;
 }
@@ -596,6 +599,7 @@ export class Agent {
 
       let hasToolUse = false;
       let textContent = "";
+      const toolResults: Array<{ name: string; input: any; result: string }> = [];
 
       for (const block of response.content) {
         if (block.type === "text") {
@@ -605,17 +609,31 @@ export class Agent {
           this.emit("tool_call", JSON.stringify({ name: block.name, args: block.input }), { tool: block.name });
           const result = await executeTool(block.name, block.input as Record<string, any>, this.storage, this.agentSettings);
           this.emit("tool_result", result, { tool: block.name });
-          this.messages.push({ role: "assistant", content: `[Tool: ${block.name}] ${JSON.stringify(block.input)}` });
-          this.messages.push({ role: "user", content: `[Tool Result for ${block.name}]: ${result}` });
+          toolResults.push({ name: block.name, input: block.input, result });
         }
       }
 
+      if (hasToolUse) {
+        // Emit any intermediate text as a thought (not a final message)
+        if (textContent) {
+          this.emit("thought", textContent);
+        }
+        // For session persistence, record tool calls and results
+        for (const tr of toolResults) {
+          this.messages.push({ role: "assistant", content: `[Tool: ${tr.name}] ${JSON.stringify(tr.input)}` });
+          this.messages.push({ role: "user", content: `[Tool Result for ${tr.name}]: ${tr.result}` });
+        }
+        // Continue the loop for the model to process results
+        continue;
+      }
+
+      // No tool use — this is the final response
       if (textContent) {
         this.emit("message", textContent, { role: "assistant" });
         this.messages.push({ role: "assistant", content: textContent });
       }
 
-      if ((response as any).stop_reason === "end_turn" || !hasToolUse) break;
+      break;
     }
 
     this.autoTitle();
@@ -653,27 +671,52 @@ export class Agent {
       const choice = response.choices[0];
       const msg: any = choice.message;
 
-      if (msg.content) {
-        this.emit("message", msg.content, { role: "assistant" });
-        this.messages.push({ role: "assistant", content: msg.content });
-      }
+      // OpenAI can return content AND tool_calls in the same response.
+      // We need to handle both properly.
+      const hasToolCalls = msg.tool_calls && msg.tool_calls.length > 0;
 
-      if (msg.tool_calls && msg.tool_calls.length > 0) {
+      if (hasToolCalls) {
+        // Push the full assistant message (with tool_calls) into the OpenAI message chain.
+        // This is required for OpenAI's tool calling protocol — the assistant message
+        // containing tool_calls must precede the tool result messages.
         openaiMessages.push(msg);
+
+        // If the model also produced text content alongside tool calls, emit it
+        // but do NOT push it as a separate assistant message (it's part of the tool-call message above)
+        if (msg.content) {
+          this.emit("thought", msg.content);
+        }
+
+        // Execute all tool calls (OpenAI may issue multiple in parallel)
         for (const tc of msg.tool_calls) {
           const fn = tc.function;
-          const args = JSON.parse(fn.arguments);
+          let args: Record<string, any>;
+          try {
+            args = JSON.parse(fn.arguments);
+          } catch {
+            args = {};
+          }
           this.emit("tool_call", JSON.stringify({ name: fn.name, args }), { tool: fn.name });
           const result = await executeTool(fn.name, args, this.storage, this.agentSettings);
           this.emit("tool_result", result, { tool: fn.name });
           openaiMessages.push({ role: "tool", tool_call_id: tc.id, content: result });
+          // Also maintain the internal message history for session persistence
+          this.messages.push({ role: "assistant", content: `[Tool: ${fn.name}] ${fn.arguments}` });
           this.messages.push({ role: "user", content: `[Tool Result for ${fn.name}]: ${result}` });
         }
-      } else {
-        break;
+        // Continue the loop — the model needs to process tool results
+        continue;
       }
 
-      if (choice.finish_reason === "stop") break;
+      // No tool calls — this is a final text response
+      if (msg.content) {
+        this.emit("message", msg.content, { role: "assistant" });
+        this.messages.push({ role: "assistant", content: msg.content });
+        openaiMessages.push({ role: "assistant", content: msg.content });
+      }
+
+      // Model is done (no tool calls = final answer)
+      break;
     }
 
     this.autoTitle();
