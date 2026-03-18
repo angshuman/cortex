@@ -1,4 +1,4 @@
-import { useState, useCallback, useRef } from "react";
+import { useState, useCallback, useRef, useEffect, useMemo } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { apiRequest, withVault } from "@/lib/queryClient";
 import { useVault } from "@/hooks/use-vault";
@@ -8,15 +8,13 @@ import { Textarea } from "@/components/ui/textarea";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { Badge } from "@/components/ui/badge";
 import { SidebarTrigger } from "@/components/ui/sidebar";
-import { Card } from "@/components/ui/card";
-import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import {
-  Dialog,
-  DialogContent,
-  DialogHeader,
-  DialogTitle,
-  DialogTrigger,
-} from "@/components/ui/dialog";
+  Sheet,
+  SheetContent,
+  SheetHeader,
+  SheetTitle,
+  SheetDescription,
+} from "@/components/ui/sheet";
 import {
   Select,
   SelectContent,
@@ -24,6 +22,13 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuSeparator,
+  DropdownMenuTrigger,
+} from "@/components/ui/dropdown-menu";
 import {
   FileText,
   Plus,
@@ -35,9 +40,26 @@ import {
   Edit3,
   Inbox,
   Pin,
-  Upload,
+  PinOff,
   Search,
   MessageSquare,
+  MoreHorizontal,
+  Bold,
+  Italic,
+  Code,
+  LinkIcon,
+  ListOrdered,
+  List,
+  Heading2,
+  Quote,
+  ImageIcon,
+  Minus,
+  X,
+  Loader2,
+  Clock,
+  FolderOpen,
+  Tag,
+  ChevronRight,
 } from "lucide-react";
 import { ContextChat, type ContextItem } from "@/components/context-chat";
 import { marked } from "marked";
@@ -55,6 +77,163 @@ interface Note {
   updatedAt: string;
 }
 
+// ============ Markdown Toolbar ============
+function MarkdownToolbar({
+  textareaRef,
+  onInsert,
+}: {
+  textareaRef: React.RefObject<HTMLTextAreaElement | null>;
+  onInsert: (text: string) => void;
+}) {
+  const wrap = (before: string, after: string) => {
+    const ta = textareaRef.current;
+    if (!ta) return;
+    const start = ta.selectionStart;
+    const end = ta.selectionEnd;
+    const selected = ta.value.substring(start, end);
+    const replacement = `${before}${selected || "text"}${after}`;
+    const newValue = ta.value.substring(0, start) + replacement + ta.value.substring(end);
+    onInsert(newValue);
+    // Restore focus & selection
+    setTimeout(() => {
+      ta.focus();
+      ta.selectionStart = start + before.length;
+      ta.selectionEnd = start + before.length + (selected || "text").length;
+    }, 10);
+  };
+
+  const insertLine = (prefix: string) => {
+    const ta = textareaRef.current;
+    if (!ta) return;
+    const start = ta.selectionStart;
+    const before = ta.value.substring(0, start);
+    const after = ta.value.substring(start);
+    const needsNewline = before.length > 0 && !before.endsWith("\n");
+    const insertion = `${needsNewline ? "\n" : ""}${prefix} `;
+    const newValue = before + insertion + after;
+    onInsert(newValue);
+    setTimeout(() => {
+      ta.focus();
+      ta.selectionStart = ta.selectionEnd = start + insertion.length;
+    }, 10);
+  };
+
+  const tools = [
+    { icon: Bold, label: "Bold", action: () => wrap("**", "**") },
+    { icon: Italic, label: "Italic", action: () => wrap("*", "*") },
+    { icon: Code, label: "Code", action: () => wrap("`", "`") },
+    { icon: LinkIcon, label: "Link", action: () => wrap("[", "](url)") },
+    { divider: true },
+    { icon: Heading2, label: "Heading", action: () => insertLine("##") },
+    { icon: List, label: "Bullet List", action: () => insertLine("-") },
+    { icon: ListOrdered, label: "Numbered List", action: () => insertLine("1.") },
+    { icon: Quote, label: "Quote", action: () => insertLine(">") },
+    { icon: Minus, label: "Divider", action: () => insertLine("---") },
+  ];
+
+  return (
+    <div className="flex items-center gap-0.5 px-3 py-1.5 border-b border-border/30 bg-muted/20">
+      {tools.map((tool, i) => {
+        if ("divider" in tool && tool.divider) {
+          return <div key={i} className="w-px h-4 bg-border/50 mx-1" />;
+        }
+        const Icon = tool.icon!;
+        return (
+          <Button
+            key={i}
+            variant="ghost"
+            size="icon"
+            className="h-6 w-6 text-muted-foreground hover:text-foreground"
+            onClick={tool.action}
+            title={tool.label}
+          >
+            <Icon className="w-3 h-3" />
+          </Button>
+        );
+      })}
+    </div>
+  );
+}
+
+// ============ Note List Item ============
+function NoteListItem({
+  note,
+  isSelected,
+  onSelect,
+}: {
+  note: Note;
+  isSelected: boolean;
+  onSelect: () => void;
+}) {
+  const previewText = useMemo(() => {
+    return note.content
+      .replace(/!\[.*?\]\(.*?\)/g, "[image]")
+      .replace(/[#*_`\[\]>]/g, "")
+      .replace(/\n+/g, " ")
+      .trim()
+      .slice(0, 100);
+  }, [note.content]);
+
+  const timeAgo = useMemo(() => {
+    const diff = Date.now() - new Date(note.updatedAt).getTime();
+    const mins = Math.floor(diff / 60000);
+    if (mins < 60) return `${mins}m ago`;
+    const hours = Math.floor(mins / 60);
+    if (hours < 24) return `${hours}h ago`;
+    const days = Math.floor(hours / 24);
+    if (days < 7) return `${days}d ago`;
+    return new Date(note.updatedAt).toLocaleDateString("en-US", { month: "short", day: "numeric" });
+  }, [note.updatedAt]);
+
+  return (
+    <button
+      onClick={onSelect}
+      className={`w-full text-left p-3 rounded-lg transition-colors ${
+        isSelected
+          ? "bg-primary/8 border border-primary/15"
+          : "hover:bg-muted/40 border border-transparent"
+      }`}
+      data-testid={`note-item-${note.id}`}
+    >
+      <div className="flex items-start gap-2">
+        <div className="flex-1 min-w-0">
+          <div className="flex items-center gap-1.5 mb-0.5">
+            {note.pinned && <Pin className="w-2.5 h-2.5 text-primary shrink-0" />}
+            <span className="text-[13px] font-medium truncate text-foreground">{note.title}</span>
+          </div>
+          {previewText && (
+            <p className="text-[11px] text-muted-foreground/60 line-clamp-2 leading-relaxed">{previewText}</p>
+          )}
+          <div className="flex items-center gap-2 mt-1.5">
+            <span className="text-[10px] text-muted-foreground/40 flex items-center gap-0.5">
+              <Clock className="w-2.5 h-2.5" />
+              {timeAgo}
+            </span>
+            {note.folder !== "/" && (
+              <span className="text-[10px] text-muted-foreground/40 flex items-center gap-0.5">
+                <FolderOpen className="w-2.5 h-2.5" />
+                {note.folder}
+              </span>
+            )}
+            {note.tags.length > 0 && (
+              <Badge variant="secondary" className="text-[9px] px-1 py-0 h-3.5 font-normal">
+                {note.tags[0]}{note.tags.length > 1 ? ` +${note.tags.length - 1}` : ""}
+              </Badge>
+            )}
+            {note.attachments.length > 0 && (
+              <span className="text-[10px] text-muted-foreground/40 flex items-center gap-0.5">
+                <ImageIcon className="w-2.5 h-2.5" />
+                {note.attachments.length}
+              </span>
+            )}
+          </div>
+        </div>
+      </div>
+    </button>
+  );
+}
+
+// ============ Main Notes Page ============
 export default function NotesPage() {
   const [selectedNote, setSelectedNote] = useState<Note | null>(null);
   const [editMode, setEditMode] = useState(false);
@@ -66,8 +245,10 @@ export default function NotesPage() {
   const [newTitle, setNewTitle] = useState("");
   const [newFolder, setNewFolder] = useState("/");
   const [chatOpen, setChatOpen] = useState(false);
+  const [viewMode, setViewMode] = useState<"edit" | "preview">("edit");
   const fileInputRef = useRef<HTMLInputElement>(null);
   const dumpFileRef = useRef<HTMLInputElement>(null);
+  const editTextareaRef = useRef<HTMLTextAreaElement>(null);
   const queryClient = useQueryClient();
   const { toast } = useToast();
   const { vaultParam, vaultId } = useVault();
@@ -95,6 +276,7 @@ export default function NotesPage() {
       queryClient.invalidateQueries({ queryKey: ["/api/notes/folders"] });
       setSelectedNote(note);
       setEditMode(true);
+      setViewMode("edit");
       setEditTitle(note.title);
       setEditContent(note.content);
       setShowNewNote(false);
@@ -107,7 +289,6 @@ export default function NotesPage() {
     onSuccess: (note) => {
       queryClient.invalidateQueries({ queryKey: ["/api/notes"] });
       setSelectedNote(note);
-      toast({ title: "Note saved" });
     },
   });
 
@@ -121,11 +302,24 @@ export default function NotesPage() {
     },
   });
 
-  const handleSave = () => {
+  const handleSave = useCallback(() => {
     if (!selectedNote) return;
     updateNote.mutate({ id: selectedNote.id, title: editTitle, content: editContent });
     setEditMode(false);
-  };
+    toast({ title: "Note saved" });
+  }, [selectedNote, editTitle, editContent, updateNote, toast]);
+
+  // Keyboard shortcut: Cmd/Ctrl+S to save
+  useEffect(() => {
+    const handler = (e: KeyboardEvent) => {
+      if ((e.metaKey || e.ctrlKey) && e.key === "s" && editMode) {
+        e.preventDefault();
+        handleSave();
+      }
+    };
+    window.addEventListener("keydown", handler);
+    return () => window.removeEventListener("keydown", handler);
+  }, [editMode, handleSave]);
 
   const handleImageUpload = async (file: File) => {
     if (!selectedNote) return;
@@ -165,13 +359,29 @@ export default function NotesPage() {
     } catch {}
   };
 
-  const filteredNotes = notes
-    .filter(n => selectedFolder === "/" ? true : n.folder === selectedFolder || n.folder.startsWith(selectedFolder + "/"))
-    .filter(n => !searchQuery || n.title.toLowerCase().includes(searchQuery.toLowerCase()) || n.content.toLowerCase().includes(searchQuery.toLowerCase()))
-    .sort((a, b) => (b.pinned ? 1 : 0) - (a.pinned ? 1 : 0) || new Date(b.updatedAt).getTime() - new Date(a.updatedAt).getTime());
+  const togglePin = (note: Note) => {
+    updateNote.mutate({ id: note.id, pinned: !note.pinned });
+  };
+
+  const filteredNotes = useMemo(() =>
+    notes
+      .filter(n => selectedFolder === "/" ? true : n.folder === selectedFolder || n.folder.startsWith(selectedFolder + "/"))
+      .filter(n => !searchQuery || n.title.toLowerCase().includes(searchQuery.toLowerCase()) || n.content.toLowerCase().includes(searchQuery.toLowerCase()))
+      .sort((a, b) => (b.pinned ? 1 : 0) - (a.pinned ? 1 : 0) || new Date(b.updatedAt).getTime() - new Date(a.updatedAt).getTime()),
+    [notes, selectedFolder, searchQuery]
+  );
+
+  const selectNote = (note: Note) => {
+    setSelectedNote(note);
+    setEditMode(false);
+    setViewMode("edit");
+    setEditTitle(note.title);
+    setEditContent(note.content);
+  };
 
   return (
     <div className="flex-1 flex flex-col h-full">
+      {/* Header */}
       <header className="flex items-center gap-2 px-4 h-12 border-b border-border/50 shrink-0">
         <SidebarTrigger />
         <FileText className="w-4 h-4 text-muted-foreground" />
@@ -186,9 +396,7 @@ export default function NotesPage() {
           >
             <MessageSquare className="w-3.5 h-3.5" /> AI
           </Button>
-          <Button size="sm" variant="ghost" className="text-xs gap-1" onClick={() => {
-            dumpFileRef.current?.click();
-          }}>
+          <Button size="sm" variant="ghost" className="text-xs gap-1" onClick={() => { dumpFileRef.current?.click(); }}>
             <Inbox className="w-3.5 h-3.5" /> Quick Dump
           </Button>
           <input ref={dumpFileRef} type="file" accept="image/*" className="hidden" onChange={(e) => {
@@ -202,26 +410,25 @@ export default function NotesPage() {
       </header>
 
       <div className="flex-1 flex min-h-0">
-        {/* Folder + Note list */}
+        {/* Sidebar: Folders + Note list */}
         <div className="w-72 border-r border-border/50 flex flex-col shrink-0">
-          <div className="p-2 border-b border-border/50">
+          <div className="p-2 space-y-2">
+            {/* Search */}
             <div className="relative">
-              <Search className="absolute left-2 top-1/2 -translate-y-1/2 w-3.5 h-3.5 text-muted-foreground" />
+              <Search className="absolute left-2.5 top-1/2 -translate-y-1/2 w-3.5 h-3.5 text-muted-foreground/50" />
               <Input
                 placeholder="Search notes..."
-                className="h-8 text-xs pl-7"
+                className="h-8 text-xs pl-8 bg-muted/30 border-border/30"
                 value={searchQuery}
                 onChange={(e) => setSearchQuery(e.target.value)}
                 data-testid="input-search-notes"
               />
             </div>
-          </div>
 
-          {/* Folder filter */}
-          <div className="p-2 border-b border-border/50">
+            {/* Folder filter */}
             <Select value={selectedFolder} onValueChange={setSelectedFolder}>
-              <SelectTrigger className="h-7 text-xs">
-                <Folder className="w-3 h-3 mr-1" />
+              <SelectTrigger className="h-7 text-xs border-border/30">
+                <Folder className="w-3 h-3 mr-1 text-muted-foreground/50" />
                 <SelectValue />
               </SelectTrigger>
               <SelectContent>
@@ -233,111 +440,202 @@ export default function NotesPage() {
             </Select>
           </div>
 
+          {/* Notes list */}
           <ScrollArea className="flex-1">
-            <div className="p-1.5">
+            <div className="p-1.5 space-y-0.5">
               {filteredNotes.length === 0 && (
-                <p className="text-xs text-muted-foreground text-center py-8">No notes yet</p>
+                <div className="text-center py-12">
+                  <FileText className="w-8 h-8 text-muted-foreground/20 mx-auto mb-2" />
+                  <p className="text-[11px] text-muted-foreground/40">No notes</p>
+                </div>
               )}
               {filteredNotes.map(note => (
-                <button
+                <NoteListItem
                   key={note.id}
-                  onClick={() => {
-                    setSelectedNote(note);
-                    setEditMode(false);
-                    setEditTitle(note.title);
-                    setEditContent(note.content);
-                  }}
-                  className={`w-full text-left p-2.5 rounded-lg mb-0.5 transition-colors ${
-                    selectedNote?.id === note.id
-                      ? "bg-primary/10 text-foreground"
-                      : "hover:bg-muted/50 text-foreground"
-                  }`}
-                  data-testid={`note-item-${note.id}`}
-                >
-                  <div className="flex items-center gap-1.5 mb-0.5">
-                    {note.pinned && <Pin className="w-2.5 h-2.5 text-primary" />}
-                    <span className="text-xs font-medium truncate">{note.title}</span>
-                  </div>
-                  <p className="text-[10px] text-muted-foreground truncate">{note.content.slice(0, 80)}</p>
-                  <div className="flex items-center gap-1 mt-1">
-                    <span className="text-[9px] text-muted-foreground/60">{note.folder}</span>
-                    <span className="text-[9px] text-muted-foreground/60">·</span>
-                    <span className="text-[9px] text-muted-foreground/60">{new Date(note.updatedAt).toLocaleDateString()}</span>
-                  </div>
-                </button>
+                  note={note}
+                  isSelected={selectedNote?.id === note.id}
+                  onSelect={() => selectNote(note)}
+                />
               ))}
             </div>
           </ScrollArea>
         </div>
 
         {/* Note content area */}
-        <div className={`flex-1 flex flex-col min-w-0 ${chatOpen ? 'max-w-[calc(100%-20rem-18rem)]' : ''}`}>
+        <div className={`flex-1 flex flex-col min-w-0 ${chatOpen ? "max-w-[calc(100%-20rem-18rem)]" : ""}`}>
           {!selectedNote ? (
             <div className="flex-1 flex items-center justify-center">
               <div className="text-center">
-                <FileText className="w-10 h-10 text-muted-foreground/30 mx-auto mb-3" />
-                <p className="text-sm text-muted-foreground">Select or create a note</p>
+                <FileText className="w-12 h-12 text-muted-foreground/15 mx-auto mb-3" />
+                <p className="text-sm text-muted-foreground/50">Select or create a note</p>
+                <p className="text-[11px] text-muted-foreground/30 mt-1">Your notes support full markdown with images</p>
               </div>
             </div>
           ) : (
             <>
               {/* Note toolbar */}
-              <div className="flex items-center gap-2 px-4 h-10 border-b border-border/50 shrink-0">
+              <div className="flex items-center gap-2 px-4 h-11 border-b border-border/50 shrink-0">
                 {editMode ? (
                   <Input
                     value={editTitle}
                     onChange={(e) => setEditTitle(e.target.value)}
-                    className="h-7 text-xs font-medium border-0 bg-transparent p-0 focus-visible:ring-0"
+                    className="h-7 text-[13px] font-semibold border-0 bg-transparent p-0 focus-visible:ring-0 flex-1"
                     data-testid="input-note-title"
                   />
                 ) : (
-                  <span className="text-xs font-medium">{selectedNote.title}</span>
+                  <div className="flex items-center gap-2 flex-1 min-w-0">
+                    <span className="text-[13px] font-semibold truncate">{selectedNote.title}</span>
+                    {selectedNote.folder !== "/" && (
+                      <span className="text-[10px] text-muted-foreground/40 flex items-center gap-0.5 shrink-0">
+                        <FolderOpen className="w-2.5 h-2.5" />
+                        {selectedNote.folder}
+                      </span>
+                    )}
+                  </div>
                 )}
-                <div className="ml-auto flex items-center gap-1">
+                <div className="flex items-center gap-1 shrink-0">
                   {editMode ? (
                     <>
+                      {/* View mode toggle (edit/preview) */}
+                      <div className="flex rounded-md border border-border/30 mr-1">
+                        <Button
+                          variant={viewMode === "edit" ? "secondary" : "ghost"}
+                          size="icon"
+                          className="h-6 w-6 rounded-r-none"
+                          onClick={() => setViewMode("edit")}
+                          title="Edit"
+                        >
+                          <Edit3 className="w-3 h-3" />
+                        </Button>
+                        <Button
+                          variant={viewMode === "preview" ? "secondary" : "ghost"}
+                          size="icon"
+                          className="h-6 w-6 rounded-l-none"
+                          onClick={() => setViewMode("preview")}
+                          title="Preview"
+                        >
+                          <Eye className="w-3 h-3" />
+                        </Button>
+                      </div>
                       <Button size="sm" variant="ghost" className="h-7 text-xs gap-1" onClick={() => fileInputRef.current?.click()}>
-                        <Image className="w-3 h-3" /> Image
+                        <ImageIcon className="w-3 h-3" /> Image
                       </Button>
                       <input ref={fileInputRef} type="file" accept="image/*" className="hidden" onChange={(e) => {
                         const f = e.target.files?.[0];
                         if (f) handleImageUpload(f);
                       }} />
+                      <Button size="sm" variant="ghost" className="h-7 text-xs" onClick={() => { setEditMode(false); setEditTitle(selectedNote.title); setEditContent(selectedNote.content); }}>
+                        Cancel
+                      </Button>
                       <Button size="sm" variant="default" className="h-7 text-xs gap-1" onClick={handleSave} data-testid="button-save-note">
                         <Save className="w-3 h-3" /> Save
                       </Button>
                     </>
                   ) : (
                     <>
-                      <Button size="sm" variant="ghost" className="h-7 text-xs gap-1" onClick={() => setEditMode(true)} data-testid="button-edit-note">
+                      <Button size="sm" variant="ghost" className="h-7 text-xs gap-1" onClick={() => { setEditMode(true); setViewMode("edit"); }} data-testid="button-edit-note">
                         <Edit3 className="w-3 h-3" /> Edit
                       </Button>
-                      <Button size="sm" variant="ghost" className="h-7 text-xs gap-1 text-destructive" onClick={() => deleteNote.mutate(selectedNote.id)}>
-                        <Trash2 className="w-3 h-3" />
-                      </Button>
+                      <DropdownMenu>
+                        <DropdownMenuTrigger asChild>
+                          <Button variant="ghost" size="icon" className="h-7 w-7">
+                            <MoreHorizontal className="w-3.5 h-3.5" />
+                          </Button>
+                        </DropdownMenuTrigger>
+                        <DropdownMenuContent align="end">
+                          <DropdownMenuItem onClick={() => togglePin(selectedNote)} className="text-xs gap-2">
+                            {selectedNote.pinned ? <PinOff className="w-3.5 h-3.5" /> : <Pin className="w-3.5 h-3.5" />}
+                            {selectedNote.pinned ? "Unpin" : "Pin to top"}
+                          </DropdownMenuItem>
+                          <DropdownMenuSeparator />
+                          <DropdownMenuItem
+                            onClick={() => deleteNote.mutate(selectedNote.id)}
+                            className="text-xs text-destructive gap-2"
+                          >
+                            <Trash2 className="w-3.5 h-3.5" />
+                            Delete note
+                          </DropdownMenuItem>
+                        </DropdownMenuContent>
+                      </DropdownMenu>
                     </>
                   )}
                 </div>
               </div>
 
               {/* Content */}
-              <div className="flex-1 overflow-auto p-4">
-                {editMode ? (
-                  <Textarea
-                    value={editContent}
-                    onChange={(e) => setEditContent(e.target.value)}
-                    onPaste={handlePaste}
-                    className="min-h-[500px] text-sm font-mono resize-none border-0 bg-transparent focus-visible:ring-0 p-0"
-                    placeholder="Write markdown..."
-                    data-testid="input-note-content"
-                  />
-                ) : (
-                  <div
-                    className="prose prose-sm dark:prose-invert max-w-none [&_img]:rounded-lg [&_img]:max-w-[500px]"
-                    dangerouslySetInnerHTML={{ __html: marked.parse(selectedNote.content) as string }}
-                  />
-                )}
-              </div>
+              {editMode ? (
+                <div className="flex-1 flex flex-col min-h-0">
+                  {viewMode === "edit" && (
+                    <MarkdownToolbar
+                      textareaRef={editTextareaRef}
+                      onInsert={(text) => setEditContent(text)}
+                    />
+                  )}
+                  <div className="flex-1 overflow-auto">
+                    {viewMode === "edit" ? (
+                      <Textarea
+                        ref={editTextareaRef}
+                        value={editContent}
+                        onChange={(e) => setEditContent(e.target.value)}
+                        onPaste={handlePaste}
+                        className="min-h-full h-full text-sm font-mono resize-none border-0 rounded-none bg-transparent focus-visible:ring-0 p-4 leading-relaxed"
+                        placeholder="Write markdown here... (paste images with Ctrl+V)"
+                        data-testid="input-note-content"
+                      />
+                    ) : (
+                      <div className="p-4">
+                        <div
+                          className="prose prose-sm dark:prose-invert max-w-none [&_img]:rounded-lg [&_img]:max-w-[600px] [&_p]:mb-3 [&_ul]:mb-3 [&_ol]:mb-3 [&_pre]:bg-muted [&_pre]:p-3 [&_pre]:rounded-lg [&_code]:text-xs [&_h1]:text-lg [&_h2]:text-base [&_h3]:text-sm"
+                          dangerouslySetInnerHTML={{ __html: marked.parse(editContent) as string }}
+                        />
+                      </div>
+                    )}
+                  </div>
+                  {/* Status bar */}
+                  <div className="flex items-center gap-3 px-4 h-7 border-t border-border/30 bg-muted/20 shrink-0">
+                    <span className="text-[10px] text-muted-foreground/40">
+                      {editContent.split(/\s+/).filter(Boolean).length} words
+                    </span>
+                    <span className="text-[10px] text-muted-foreground/40">
+                      {editContent.length} chars
+                    </span>
+                    <span className="text-[10px] text-muted-foreground/40">
+                      {editContent.split("\n").length} lines
+                    </span>
+                    <span className="ml-auto text-[10px] text-muted-foreground/40">
+                      Markdown supported · Ctrl+S to save
+                    </span>
+                  </div>
+                </div>
+              ) : (
+                <ScrollArea className="flex-1">
+                  <div className="p-5 max-w-3xl">
+                    {/* Note metadata */}
+                    <div className="flex items-center gap-3 mb-4 pb-4 border-b border-border/30">
+                      <span className="text-[10px] text-muted-foreground/40">
+                        Updated {new Date(selectedNote.updatedAt).toLocaleString()}
+                      </span>
+                      {selectedNote.tags.length > 0 && (
+                        <div className="flex items-center gap-1">
+                          {selectedNote.tags.map((tag) => (
+                            <Badge key={tag} variant="secondary" className="text-[10px] px-1.5 py-0 h-4 font-normal gap-1">
+                              <Tag className="w-2 h-2" />{tag}
+                            </Badge>
+                          ))}
+                        </div>
+                      )}
+                    </div>
+                    {selectedNote.content ? (
+                      <div
+                        className="prose prose-sm dark:prose-invert max-w-none [&_img]:rounded-lg [&_img]:max-w-[600px] [&_p]:mb-3 [&_ul]:mb-3 [&_ol]:mb-3 [&_pre]:bg-muted [&_pre]:p-3 [&_pre]:rounded-lg [&_code]:text-xs [&_h1]:text-lg [&_h2]:text-base [&_h3]:text-sm"
+                        dangerouslySetInnerHTML={{ __html: marked.parse(selectedNote.content) as string }}
+                      />
+                    ) : (
+                      <p className="text-sm text-muted-foreground/40 italic">Empty note — click Edit to add content</p>
+                    )}
+                  </div>
+                </ScrollArea>
+              )}
             </>
           )}
         </div>
@@ -356,32 +654,44 @@ export default function NotesPage() {
         />
       </div>
 
-      {/* New note dialog */}
-      <Dialog open={showNewNote} onOpenChange={setShowNewNote}>
-        <DialogContent className="sm:max-w-md">
-          <DialogHeader>
-            <DialogTitle className="text-sm">New Note</DialogTitle>
-          </DialogHeader>
-          <div className="space-y-3">
-            <Input
-              placeholder="Note title"
-              value={newTitle}
-              onChange={(e) => setNewTitle(e.target.value)}
-              className="text-sm"
-              data-testid="input-new-note-title"
-            />
-            <Select value={newFolder} onValueChange={setNewFolder}>
-              <SelectTrigger className="text-sm">
-                <SelectValue placeholder="Folder" />
-              </SelectTrigger>
-              <SelectContent>
-                <SelectItem value="/">Root</SelectItem>
-                <SelectItem value="/inbox">Inbox</SelectItem>
-                <SelectItem value="/projects">Projects</SelectItem>
-                <SelectItem value="/personal">Personal</SelectItem>
-                <SelectItem value="/work">Work</SelectItem>
-              </SelectContent>
-            </Select>
+      {/* New note sheet */}
+      <Sheet open={showNewNote} onOpenChange={setShowNewNote}>
+        <SheetContent side="right" className="w-full sm:max-w-md p-0 flex flex-col border-l border-border/50">
+          <SheetHeader className="sr-only">
+            <SheetTitle>New Note</SheetTitle>
+            <SheetDescription>Create a new note</SheetDescription>
+          </SheetHeader>
+          <div className="flex items-center gap-2 px-5 h-14 border-b border-border/50 shrink-0">
+            <Plus className="w-4 h-4 text-muted-foreground" />
+            <span className="text-sm font-medium">New Note</span>
+          </div>
+          <div className="px-5 py-5 space-y-4">
+            <div className="space-y-1">
+              <label className="text-[10px] uppercase tracking-wider text-muted-foreground/60 font-medium">Title</label>
+              <Input
+                placeholder="Note title"
+                value={newTitle}
+                onChange={(e) => setNewTitle(e.target.value)}
+                className="text-sm"
+                autoFocus
+                data-testid="input-new-note-title"
+              />
+            </div>
+            <div className="space-y-1">
+              <label className="text-[10px] uppercase tracking-wider text-muted-foreground/60 font-medium">Folder</label>
+              <Select value={newFolder} onValueChange={setNewFolder}>
+                <SelectTrigger className="text-xs h-8">
+                  <SelectValue placeholder="Folder" />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="/">Root</SelectItem>
+                  <SelectItem value="/inbox">Inbox</SelectItem>
+                  <SelectItem value="/projects">Projects</SelectItem>
+                  <SelectItem value="/personal">Personal</SelectItem>
+                  <SelectItem value="/work">Work</SelectItem>
+                </SelectContent>
+              </Select>
+            </div>
             <Button
               className="w-full text-sm"
               onClick={() => createNote.mutate({ title: newTitle || "Untitled", content: "", folder: newFolder })}
@@ -390,8 +700,8 @@ export default function NotesPage() {
               Create Note
             </Button>
           </div>
-        </DialogContent>
-      </Dialog>
+        </SheetContent>
+      </Sheet>
     </div>
   );
 }

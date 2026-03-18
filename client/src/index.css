@@ -163,6 +163,36 @@
   --tw-prose-pre-code: hsl(220 5% 80%);
 }
 
+/* Kanban drag styles */
+.dnd-sortable-dragging {
+  opacity: 0.5;
+}
+
+/* Line clamp utility */
+.line-clamp-2 {
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+}
+
+.line-clamp-1 {
+  display: -webkit-box;
+  -webkit-line-clamp: 1;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+}
+
+/* Markdown editor styles */
+.font-mono {
+  font-family: var(--font-mono);
+}
+
+/* Sheet overlay - less aggressive for side panels */
+[data-state="open"][role="dialog"] + [data-radix-collection-item] {
+  pointer-events: auto;
+}
+
 @layer utilities {
   input[type="search"]::-webkit-search-cancel-button {
     @apply hidden;

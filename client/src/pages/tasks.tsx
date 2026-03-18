@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useState, useCallback, useMemo } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { apiRequest, withVault } from "@/lib/queryClient";
 import { useVault } from "@/hooks/use-vault";
@@ -8,14 +8,14 @@ import { Textarea } from "@/components/ui/textarea";
 import { Badge } from "@/components/ui/badge";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { SidebarTrigger } from "@/components/ui/sidebar";
-import { Card } from "@/components/ui/card";
 import { Checkbox } from "@/components/ui/checkbox";
 import {
-  Dialog,
-  DialogContent,
-  DialogHeader,
-  DialogTitle,
-} from "@/components/ui/dialog";
+  Sheet,
+  SheetContent,
+  SheetHeader,
+  SheetTitle,
+  SheetDescription,
+} from "@/components/ui/sheet";
 import {
   Select,
   SelectContent,
@@ -31,13 +31,49 @@ import {
   Flag,
   LayoutGrid,
   List,
-  ChevronRight,
   Edit3,
   X,
   MessageSquare,
+  GripVertical,
+  Circle,
+  Clock,
+  CheckCircle2,
+  Archive,
+  ChevronRight,
+  Save,
+  Tag,
+  MoreHorizontal,
 } from "lucide-react";
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuSeparator,
+  DropdownMenuTrigger,
+} from "@/components/ui/dropdown-menu";
 import { ContextChat, type ContextItem } from "@/components/context-chat";
 import { useToast } from "@/hooks/use-toast";
+import { marked } from "marked";
+import {
+  DndContext,
+  DragOverlay,
+  closestCorners,
+  KeyboardSensor,
+  PointerSensor,
+  useSensor,
+  useSensors,
+  type DragStartEvent,
+  type DragEndEvent,
+  type DragOverEvent,
+  useDroppable,
+} from "@dnd-kit/core";
+import {
+  SortableContext,
+  sortableKeyboardCoordinates,
+  verticalListSortingStrategy,
+  useSortable,
+} from "@dnd-kit/sortable";
+import { CSS } from "@dnd-kit/utilities";
 
 interface Task {
   id: string;
@@ -54,24 +90,473 @@ interface Task {
   completedAt: string | null;
 }
 
-const statusConfig = {
-  todo: { label: "To Do", color: "bg-zinc-500" },
-  in_progress: { label: "In Progress", color: "bg-blue-500" },
-  done: { label: "Done", color: "bg-green-500" },
-  archived: { label: "Archived", color: "bg-zinc-400" },
+const statusConfig: Record<string, { label: string; icon: typeof Circle; color: string; bgColor: string }> = {
+  todo: { label: "To Do", icon: Circle, color: "text-zinc-400", bgColor: "bg-zinc-400" },
+  in_progress: { label: "In Progress", icon: Clock, color: "text-amber-500", bgColor: "bg-amber-500" },
+  done: { label: "Done", icon: CheckCircle2, color: "text-emerald-500", bgColor: "bg-emerald-500" },
+  archived: { label: "Archived", icon: Archive, color: "text-zinc-500", bgColor: "bg-zinc-500" },
 };
 
-const priorityConfig = {
-  low: { label: "Low", color: "text-zinc-400" },
-  medium: { label: "Medium", color: "text-yellow-500" },
-  high: { label: "High", color: "text-orange-500" },
-  urgent: { label: "Urgent", color: "text-red-500" },
+const priorityConfig: Record<string, { label: string; color: string; dotColor: string }> = {
+  low: { label: "Low", color: "text-zinc-400", dotColor: "bg-zinc-400" },
+  medium: { label: "Medium", color: "text-yellow-500", dotColor: "bg-yellow-500" },
+  high: { label: "High", color: "text-orange-500", dotColor: "bg-orange-500" },
+  urgent: { label: "Urgent", color: "text-red-500", dotColor: "bg-red-500" },
 };
 
+// ============ Sortable Task Card (for kanban) ============
+function SortableTaskCard({
+  task,
+  onOpen,
+  onToggle,
+  subtaskCount,
+  subtaskDone,
+}: {
+  task: Task;
+  onOpen: (task: Task) => void;
+  onToggle: (task: Task) => void;
+  subtaskCount: number;
+  subtaskDone: number;
+}) {
+  const {
+    attributes,
+    listeners,
+    setNodeRef,
+    transform,
+    transition,
+    isDragging,
+  } = useSortable({ id: task.id, data: { task, type: "task" } });
+
+  const style = {
+    transform: CSS.Transform.toString(transform),
+    transition,
+    opacity: isDragging ? 0.4 : 1,
+  };
+
+  const pc = priorityConfig[task.priority] || priorityConfig.medium;
+  const sc = statusConfig[task.status] || statusConfig.todo;
+
+  return (
+    <div
+      ref={setNodeRef}
+      style={style}
+      className="group relative rounded-lg border border-border/50 bg-card p-3 hover:border-border transition-colors cursor-pointer"
+      onClick={() => onOpen(task)}
+      data-testid={`kanban-card-${task.id}`}
+    >
+      <div className="flex items-start gap-2">
+        <div
+          className="mt-1 cursor-grab active:cursor-grabbing text-muted-foreground/40 hover:text-muted-foreground transition-colors shrink-0 opacity-0 group-hover:opacity-100"
+          {...attributes}
+          {...listeners}
+          onClick={(e) => e.stopPropagation()}
+        >
+          <GripVertical className="w-3.5 h-3.5" />
+        </div>
+        <Checkbox
+          checked={task.status === "done"}
+          onCheckedChange={() => onToggle(task)}
+          className="mt-0.5 shrink-0"
+          onClick={(e) => e.stopPropagation()}
+          data-testid={`checkbox-task-${task.id}`}
+        />
+        <div className="flex-1 min-w-0">
+          <p className={`text-[13px] font-medium leading-tight ${task.status === "done" ? "line-through text-muted-foreground" : "text-foreground"}`}>
+            {task.title}
+          </p>
+          {task.description && (
+            <p className="text-[11px] text-muted-foreground/70 mt-1 line-clamp-2 leading-relaxed">
+              {task.description.replace(/[#*_`\[\]]/g, "").slice(0, 120)}
+            </p>
+          )}
+          <div className="flex items-center gap-1.5 mt-2 flex-wrap">
+            <span className={`w-1.5 h-1.5 rounded-full ${pc.dotColor} shrink-0`} />
+            {task.dueDate && (
+              <span className="text-[10px] text-muted-foreground flex items-center gap-0.5">
+                <Calendar className="w-2.5 h-2.5" />
+                {new Date(task.dueDate).toLocaleDateString("en-US", { month: "short", day: "numeric" })}
+              </span>
+            )}
+            {task.tags.length > 0 && task.tags.slice(0, 2).map((tag) => (
+              <Badge key={tag} variant="secondary" className="text-[9px] px-1 py-0 h-3.5 font-normal">
+                {tag}
+              </Badge>
+            ))}
+            {subtaskCount > 0 && (
+              <span className="text-[10px] text-muted-foreground">
+                {subtaskDone}/{subtaskCount}
+              </span>
+            )}
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// ============ Droppable Kanban Column ============
+function KanbanColumn({
+  status,
+  tasks,
+  allTasks,
+  onOpen,
+  onToggle,
+  onAddTask,
+}: {
+  status: string;
+  tasks: Task[];
+  allTasks: Task[];
+  onOpen: (task: Task) => void;
+  onToggle: (task: Task) => void;
+  onAddTask: (status: string) => void;
+}) {
+  const sc = statusConfig[status] || statusConfig.todo;
+  const StatusIcon = sc.icon;
+  const { setNodeRef, isOver } = useDroppable({ id: `column-${status}` });
+
+  return (
+    <div className="flex-1 min-w-[280px] max-w-[360px] flex flex-col">
+      <div className="flex items-center gap-2 mb-3 px-1">
+        <StatusIcon className={`w-4 h-4 ${sc.color}`} />
+        <span className="text-xs font-semibold tracking-wide uppercase text-muted-foreground">{sc.label}</span>
+        <span className="text-[10px] text-muted-foreground/60 ml-0.5">{tasks.length}</span>
+        <Button
+          variant="ghost"
+          size="icon"
+          className="h-5 w-5 ml-auto text-muted-foreground/50 hover:text-foreground"
+          onClick={() => onAddTask(status)}
+          data-testid={`button-add-task-${status}`}
+        >
+          <Plus className="w-3 h-3" />
+        </Button>
+      </div>
+      <div
+        ref={setNodeRef}
+        className={`flex-1 rounded-lg transition-colors ${isOver ? "bg-primary/5 ring-1 ring-primary/20" : ""}`}
+      >
+        <ScrollArea className="h-[calc(100vh-180px)]">
+          <SortableContext items={tasks.map(t => t.id)} strategy={verticalListSortingStrategy}>
+            <div className="space-y-2 pr-2 pb-8">
+              {tasks.map((task) => {
+                const subtasks = allTasks.filter(t => t.parentId === task.id);
+                return (
+                  <SortableTaskCard
+                    key={task.id}
+                    task={task}
+                    onOpen={onOpen}
+                    onToggle={onToggle}
+                    subtaskCount={subtasks.length}
+                    subtaskDone={subtasks.filter(s => s.status === "done").length}
+                  />
+                );
+              })}
+              {tasks.length === 0 && (
+                <div className="text-center py-12">
+                  <p className="text-[11px] text-muted-foreground/40">No tasks</p>
+                </div>
+              )}
+            </div>
+          </SortableContext>
+        </ScrollArea>
+      </div>
+    </div>
+  );
+}
+
+// ============ Task Detail Slide-Over ============
+function TaskDetailPanel({
+  task,
+  allTasks,
+  open,
+  onClose,
+  onUpdate,
+  onDelete,
+}: {
+  task: Task | null;
+  allTasks: Task[];
+  open: boolean;
+  onClose: () => void;
+  onUpdate: (data: any) => void;
+  onDelete: (id: string) => void;
+}) {
+  const [editing, setEditing] = useState(false);
+  const [editTitle, setEditTitle] = useState("");
+  const [editDesc, setEditDesc] = useState("");
+  const [editStatus, setEditStatus] = useState("");
+  const [editPriority, setEditPriority] = useState("");
+  const [editDueDate, setEditDueDate] = useState("");
+  const [editTags, setEditTags] = useState("");
+
+  const startEditing = useCallback(() => {
+    if (!task) return;
+    setEditTitle(task.title);
+    setEditDesc(task.description);
+    setEditStatus(task.status);
+    setEditPriority(task.priority);
+    setEditDueDate(task.dueDate || "");
+    setEditTags(task.tags.join(", "));
+    setEditing(true);
+  }, [task]);
+
+  const handleSave = () => {
+    if (!task) return;
+    onUpdate({
+      id: task.id,
+      title: editTitle,
+      description: editDesc,
+      status: editStatus,
+      priority: editPriority,
+      dueDate: editDueDate || null,
+      tags: editTags.split(",").map(t => t.trim()).filter(Boolean),
+    });
+    setEditing(false);
+  };
+
+  if (!task) return null;
+
+  const sc = statusConfig[task.status] || statusConfig.todo;
+  const pc = priorityConfig[task.priority] || priorityConfig.medium;
+  const StatusIcon = sc.icon;
+  const subtasks = allTasks.filter(t => t.parentId === task.id);
+
+  return (
+    <Sheet open={open} onOpenChange={(v) => { if (!v) { setEditing(false); onClose(); } }}>
+      <SheetContent
+        side="right"
+        className="w-full sm:max-w-lg p-0 flex flex-col overflow-hidden border-l border-border/50"
+      >
+        <SheetHeader className="sr-only">
+          <SheetTitle>{task.title}</SheetTitle>
+          <SheetDescription>Task details</SheetDescription>
+        </SheetHeader>
+
+        {/* Header */}
+        <div className="flex items-center gap-2 px-5 h-14 border-b border-border/50 shrink-0">
+          <StatusIcon className={`w-4 h-4 ${sc.color} shrink-0`} />
+          <span className="text-xs text-muted-foreground">{sc.label}</span>
+          <div className="ml-auto flex items-center gap-1">
+            {!editing ? (
+              <>
+                <Button variant="ghost" size="sm" className="h-7 text-xs gap-1" onClick={startEditing} data-testid="button-edit-task">
+                  <Edit3 className="w-3 h-3" /> Edit
+                </Button>
+                <DropdownMenu>
+                  <DropdownMenuTrigger asChild>
+                    <Button variant="ghost" size="icon" className="h-7 w-7">
+                      <MoreHorizontal className="w-3.5 h-3.5" />
+                    </Button>
+                  </DropdownMenuTrigger>
+                  <DropdownMenuContent align="end">
+                    {Object.entries(statusConfig).map(([key, cfg]) => (
+                      <DropdownMenuItem
+                        key={key}
+                        onClick={() => onUpdate({ id: task.id, status: key })}
+                        className="text-xs gap-2"
+                      >
+                        <cfg.icon className={`w-3.5 h-3.5 ${cfg.color}`} />
+                        Move to {cfg.label}
+                      </DropdownMenuItem>
+                    ))}
+                    <DropdownMenuSeparator />
+                    <DropdownMenuItem
+                      onClick={() => onDelete(task.id)}
+                      className="text-xs text-destructive gap-2"
+                    >
+                      <Trash2 className="w-3.5 h-3.5" />
+                      Delete task
+                    </DropdownMenuItem>
+                  </DropdownMenuContent>
+                </DropdownMenu>
+              </>
+            ) : (
+              <>
+                <Button variant="ghost" size="sm" className="h-7 text-xs" onClick={() => setEditing(false)}>
+                  Cancel
+                </Button>
+                <Button size="sm" className="h-7 text-xs gap-1" onClick={handleSave} data-testid="button-save-task">
+                  <Save className="w-3 h-3" /> Save
+                </Button>
+              </>
+            )}
+          </div>
+        </div>
+
+        {/* Body */}
+        <ScrollArea className="flex-1">
+          <div className="px-5 py-5 space-y-5">
+            {/* Title */}
+            {editing ? (
+              <Input
+                value={editTitle}
+                onChange={(e) => setEditTitle(e.target.value)}
+                className="text-base font-semibold border-0 bg-transparent px-0 focus-visible:ring-0 h-auto"
+                placeholder="Task title"
+                data-testid="input-edit-task-title"
+              />
+            ) : (
+              <h2 className={`text-base font-semibold ${task.status === "done" ? "line-through text-muted-foreground" : ""}`}>
+                {task.title}
+              </h2>
+            )}
+
+            {/* Metadata grid */}
+            <div className="grid grid-cols-2 gap-3">
+              <div className="space-y-1">
+                <label className="text-[10px] uppercase tracking-wider text-muted-foreground/60 font-medium">Status</label>
+                {editing ? (
+                  <Select value={editStatus} onValueChange={setEditStatus}>
+                    <SelectTrigger className="h-8 text-xs">
+                      <SelectValue />
+                    </SelectTrigger>
+                    <SelectContent>
+                      {Object.entries(statusConfig).map(([key, cfg]) => (
+                        <SelectItem key={key} value={key}>
+                          <span className="flex items-center gap-1.5">
+                            <cfg.icon className={`w-3 h-3 ${cfg.color}`} />
+                            {cfg.label}
+                          </span>
+                        </SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                ) : (
+                  <div className="flex items-center gap-1.5">
+                    <StatusIcon className={`w-3.5 h-3.5 ${sc.color}`} />
+                    <span className="text-xs">{sc.label}</span>
+                  </div>
+                )}
+              </div>
+
+              <div className="space-y-1">
+                <label className="text-[10px] uppercase tracking-wider text-muted-foreground/60 font-medium">Priority</label>
+                {editing ? (
+                  <Select value={editPriority} onValueChange={setEditPriority}>
+                    <SelectTrigger className="h-8 text-xs">
+                      <SelectValue />
+                    </SelectTrigger>
+                    <SelectContent>
+                      {Object.entries(priorityConfig).map(([key, cfg]) => (
+                        <SelectItem key={key} value={key}>
+                          <span className="flex items-center gap-1.5">
+                            <span className={`w-2 h-2 rounded-full ${cfg.dotColor}`} />
+                            {cfg.label}
+                          </span>
+                        </SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                ) : (
+                  <div className="flex items-center gap-1.5">
+                    <Flag className={`w-3.5 h-3.5 ${pc.color}`} />
+                    <span className="text-xs">{pc.label}</span>
+                  </div>
+                )}
+              </div>
+
+              <div className="space-y-1">
+                <label className="text-[10px] uppercase tracking-wider text-muted-foreground/60 font-medium">Due Date</label>
+                {editing ? (
+                  <Input
+                    type="date"
+                    value={editDueDate}
+                    onChange={(e) => setEditDueDate(e.target.value)}
+                    className="h-8 text-xs"
+                  />
+                ) : (
+                  <span className="text-xs text-muted-foreground">
+                    {task.dueDate ? new Date(task.dueDate).toLocaleDateString("en-US", { month: "long", day: "numeric", year: "numeric" }) : "No date"}
+                  </span>
+                )}
+              </div>
+
+              <div className="space-y-1">
+                <label className="text-[10px] uppercase tracking-wider text-muted-foreground/60 font-medium">Tags</label>
+                {editing ? (
+                  <Input
+                    value={editTags}
+                    onChange={(e) => setEditTags(e.target.value)}
+                    placeholder="tag1, tag2"
+                    className="h-8 text-xs"
+                  />
+                ) : (
+                  <div className="flex flex-wrap gap-1">
+                    {task.tags.length > 0 ? task.tags.map((tag) => (
+                      <Badge key={tag} variant="secondary" className="text-[10px] px-1.5 py-0 h-4 font-normal gap-1">
+                        <Tag className="w-2 h-2" />{tag}
+                      </Badge>
+                    )) : (
+                      <span className="text-xs text-muted-foreground">No tags</span>
+                    )}
+                  </div>
+                )}
+              </div>
+            </div>
+
+            {/* Description */}
+            <div className="space-y-2">
+              <label className="text-[10px] uppercase tracking-wider text-muted-foreground/60 font-medium">Description</label>
+              {editing ? (
+                <Textarea
+                  value={editDesc}
+                  onChange={(e) => setEditDesc(e.target.value)}
+                  placeholder="Add a description (supports markdown)..."
+                  className="min-h-[200px] text-sm font-mono resize-none"
+                  data-testid="input-edit-task-desc"
+                />
+              ) : task.description ? (
+                <div
+                  className="prose prose-sm dark:prose-invert max-w-none text-sm [&_img]:rounded-lg [&_img]:max-w-full [&_p]:mb-2 [&_ul]:mb-2 [&_ol]:mb-2 [&_pre]:bg-muted [&_pre]:p-3 [&_pre]:rounded-lg [&_code]:text-xs"
+                  dangerouslySetInnerHTML={{ __html: marked.parse(task.description) as string }}
+                />
+              ) : (
+                <p className="text-sm text-muted-foreground/50 italic">No description</p>
+              )}
+            </div>
+
+            {/* Subtasks */}
+            {subtasks.length > 0 && (
+              <div className="space-y-2">
+                <label className="text-[10px] uppercase tracking-wider text-muted-foreground/60 font-medium">
+                  Subtasks ({subtasks.filter(s => s.status === "done").length}/{subtasks.length})
+                </label>
+                <div className="space-y-1">
+                  {subtasks.map((st) => (
+                    <div key={st.id} className="flex items-center gap-2 py-1">
+                      <Checkbox
+                        checked={st.status === "done"}
+                        onCheckedChange={() => onUpdate({ id: st.id, status: st.status === "done" ? "todo" : "done" })}
+                        className="shrink-0"
+                      />
+                      <span className={`text-xs ${st.status === "done" ? "line-through text-muted-foreground" : ""}`}>
+                        {st.title}
+                      </span>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            )}
+
+            {/* Timestamps */}
+            <div className="border-t border-border/30 pt-4 space-y-1">
+              <p className="text-[10px] text-muted-foreground/50">Created {new Date(task.createdAt).toLocaleString()}</p>
+              <p className="text-[10px] text-muted-foreground/50">Updated {new Date(task.updatedAt).toLocaleString()}</p>
+              {task.completedAt && (
+                <p className="text-[10px] text-muted-foreground/50">Completed {new Date(task.completedAt).toLocaleString()}</p>
+              )}
+            </div>
+          </div>
+        </ScrollArea>
+      </SheetContent>
+    </Sheet>
+  );
+}
+
+// ============ Main Tasks Page ============
 export default function TasksPage() {
   const [view, setView] = useState<"list" | "kanban">("kanban");
+  const [detailTask, setDetailTask] = useState<Task | null>(null);
   const [showNewTask, setShowNewTask] = useState(false);
-  const [editingTask, setEditingTask] = useState<Task | null>(null);
+  const [newTaskStatus, setNewTaskStatus] = useState("todo");
   const [newTitle, setNewTitle] = useState("");
   const [newDesc, setNewDesc] = useState("");
   const [newPriority, setNewPriority] = useState("medium");
@@ -79,9 +564,15 @@ export default function TasksPage() {
   const [newParentId, setNewParentId] = useState<string>("");
   const [filterStatus, setFilterStatus] = useState<string>("all");
   const [chatOpen, setChatOpen] = useState(false);
+  const [activeId, setActiveId] = useState<string | null>(null);
   const queryClient = useQueryClient();
   const { toast } = useToast();
   const { vaultParam, vaultId } = useVault();
+
+  const sensors = useSensors(
+    useSensor(PointerSensor, { activationConstraint: { distance: 5 } }),
+    useSensor(KeyboardSensor, { coordinateGetter: sortableKeyboardCoordinates }),
+  );
 
   const { data: tasks = [] } = useQuery<Task[]>({
     queryKey: ["/api/tasks", vaultId],
@@ -107,6 +598,17 @@ export default function TasksPage() {
 
   const updateTask = useMutation({
     mutationFn: ({ id, ...data }: any) => apiRequest("PATCH", withVault(`/api/tasks/${id}`, vaultParam), data).then(r => r.json()),
+    onSuccess: (updated) => {
+      queryClient.invalidateQueries({ queryKey: ["/api/tasks"] });
+      // Update detail panel if same task
+      if (detailTask && updated && (updated as Task).id === detailTask.id) {
+        setDetailTask(updated as Task);
+      }
+    },
+  });
+
+  const reorderTasks = useMutation({
+    mutationFn: (data: { taskIds: string[] }) => apiRequest("POST", withVault("/api/tasks/reorder", vaultParam), data),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["/api/tasks"] });
     },
@@ -116,162 +618,162 @@ export default function TasksPage() {
     mutationFn: (id: string) => apiRequest("DELETE", withVault(`/api/tasks/${id}`, vaultParam)),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["/api/tasks"] });
-      setEditingTask(null);
+      setDetailTask(null);
       toast({ title: "Task deleted" });
     },
   });
 
-  const toggleDone = (task: Task) => {
+  const toggleDone = useCallback((task: Task) => {
     updateTask.mutate({
       id: task.id,
       status: task.status === "done" ? "todo" : "done",
     });
-  };
+  }, [updateTask]);
 
-  const filteredTasks = tasks
-    .filter(t => filterStatus === "all" || t.status === filterStatus)
-    .sort((a, b) => a.order - b.order);
+  // Organize tasks by status for kanban
+  const tasksByStatus = useMemo(() => {
+    const groups: Record<string, Task[]> = { todo: [], in_progress: [], done: [] };
+    tasks
+      .filter(t => !t.parentId && t.status !== "archived")
+      .sort((a, b) => a.order - b.order)
+      .forEach(t => {
+        if (groups[t.status]) groups[t.status].push(t);
+      });
+    return groups;
+  }, [tasks]);
+
+  const filteredTasks = useMemo(() =>
+    tasks
+      .filter(t => filterStatus === "all" || t.status === filterStatus)
+      .sort((a, b) => a.order - b.order),
+    [tasks, filterStatus]
+  );
 
   const topLevelTasks = filteredTasks.filter(t => !t.parentId);
   const getSubtasks = (parentId: string) => filteredTasks.filter(t => t.parentId === parentId);
 
-  const renderTaskCard = (task: Task, indent = 0) => {
+  // DnD handlers
+  const handleDragStart = (event: DragStartEvent) => {
+    setActiveId(event.active.id as string);
+  };
+
+  const handleDragEnd = (event: DragEndEvent) => {
+    const { active, over } = event;
+    setActiveId(null);
+    if (!over) return;
+
+    const activeTask = tasks.find(t => t.id === active.id);
+    if (!activeTask) return;
+
+    // Determine target column
+    let targetStatus: string | null = null;
+    const overId = over.id as string;
+
+    if (overId.startsWith("column-")) {
+      targetStatus = overId.replace("column-", "");
+    } else {
+      const overTask = tasks.find(t => t.id === overId);
+      if (overTask) targetStatus = overTask.status;
+    }
+
+    if (!targetStatus) return;
+
+    // If status changed, update the task
+    if (activeTask.status !== targetStatus) {
+      updateTask.mutate({ id: activeTask.id, status: targetStatus });
+    }
+
+    // Reorder within column
+    const columnTasks = tasks
+      .filter(t => !t.parentId && (t.id === activeTask.id ? targetStatus : t.status) === targetStatus)
+      .sort((a, b) => a.order - b.order);
+
+    const oldIndex = columnTasks.findIndex(t => t.id === activeTask.id);
+    const overTask = tasks.find(t => t.id === overId);
+    const newIndex = overTask ? columnTasks.findIndex(t => t.id === overTask.id) : columnTasks.length - 1;
+
+    if (oldIndex !== newIndex && newIndex >= 0) {
+      const reordered = [...columnTasks];
+      const [moved] = reordered.splice(oldIndex, 1);
+      if (moved) reordered.splice(newIndex, 0, moved);
+      reorderTasks.mutate({ taskIds: reordered.map(t => t.id) });
+    }
+  };
+
+  const handleDragOver = (event: DragOverEvent) => {
+    // No-op — we handle everything in dragEnd
+  };
+
+  const activeTask = activeId ? tasks.find(t => t.id === activeId) : null;
+
+  const handleAddTaskInColumn = (status: string) => {
+    setNewTaskStatus(status);
+    setShowNewTask(true);
+  };
+
+  // ============ LIST VIEW ROW ============
+  const renderListRow = (task: Task, indent = 0) => {
     const subtasks = getSubtasks(task.id);
-    const sc = statusConfig[task.status as keyof typeof statusConfig] || statusConfig.todo;
-    const pc = priorityConfig[task.priority as keyof typeof priorityConfig] || priorityConfig.medium;
+    const sc = statusConfig[task.status] || statusConfig.todo;
+    const pc = priorityConfig[task.priority] || priorityConfig.medium;
+    const StatusIcon = sc.icon;
 
     return (
-      <div key={task.id} style={{ marginLeft: indent * 20 }}>
+      <div key={task.id} style={{ paddingLeft: indent * 24 }}>
         <div
-          className={`group flex items-start gap-2.5 p-2.5 rounded-lg hover:bg-muted/50 transition-colors ${
-            task.status === "done" ? "opacity-60" : ""
-          }`}
+          className="group flex items-center gap-3 py-2.5 px-3 rounded-lg hover:bg-muted/40 transition-colors cursor-pointer"
+          onClick={() => setDetailTask(task)}
           data-testid={`task-item-${task.id}`}
         >
           <Checkbox
             checked={task.status === "done"}
             onCheckedChange={() => toggleDone(task)}
-            className="mt-0.5 shrink-0"
+            className="shrink-0"
+            onClick={(e) => e.stopPropagation()}
             data-testid={`checkbox-task-${task.id}`}
           />
-          <div className="flex-1 min-w-0">
-            <div className="flex items-center gap-2 mb-0.5">
-              <span className={`text-sm ${task.status === "done" ? "line-through text-muted-foreground" : "text-foreground"}`}>
-                {task.title}
-              </span>
-              <Flag className={`w-3 h-3 ${pc.color} shrink-0`} />
-            </div>
+          <StatusIcon className={`w-3.5 h-3.5 ${sc.color} shrink-0`} />
+          <div className="flex-1 min-w-0 flex items-center gap-2">
+            <span className={`text-[13px] font-medium truncate ${task.status === "done" ? "line-through text-muted-foreground" : "text-foreground"}`}>
+              {task.title}
+            </span>
             {task.description && (
-              <p className="text-[11px] text-muted-foreground truncate">{task.description}</p>
+              <>
+                <ChevronRight className="w-3 h-3 text-muted-foreground/30 shrink-0" />
+                <span className="text-[11px] text-muted-foreground/50 truncate">
+                  {task.description.replace(/[#*_`\[\]]/g, "").slice(0, 60)}
+                </span>
+              </>
             )}
-            <div className="flex items-center gap-2 mt-1">
-              <Badge variant="secondary" className="text-[9px] px-1.5 py-0 h-3.5">
-                <span className={`w-1.5 h-1.5 rounded-full ${sc.color} mr-1`} />
-                {sc.label}
+          </div>
+          <div className="flex items-center gap-2 shrink-0">
+            <span className={`w-1.5 h-1.5 rounded-full ${pc.dotColor}`} title={pc.label} />
+            {task.tags.length > 0 && (
+              <Badge variant="secondary" className="text-[9px] px-1 py-0 h-3.5 font-normal">
+                {task.tags[0]}{task.tags.length > 1 ? ` +${task.tags.length - 1}` : ""}
               </Badge>
-              {task.dueDate && (
-                <span className="text-[9px] text-muted-foreground flex items-center gap-0.5">
-                  <Calendar className="w-2.5 h-2.5" />
-                  {new Date(task.dueDate).toLocaleDateString()}
-                </span>
-              )}
-              {subtasks.length > 0 && (
-                <span className="text-[9px] text-muted-foreground">
-                  {subtasks.filter(s => s.status === "done").length}/{subtasks.length} subtasks
-                </span>
-              )}
-            </div>
-          </div>
-          <Button
-            variant="ghost"
-            size="icon"
-            className="h-6 w-6 opacity-0 group-hover:opacity-100 transition-opacity shrink-0"
-            onClick={() => setEditingTask(task)}
-          >
-            <Edit3 className="w-3 h-3" />
-          </Button>
-        </div>
-        {subtasks.map(st => renderTaskCard(st, indent + 1))}
-      </div>
-    );
-  };
-
-  const renderKanbanColumn = (status: string) => {
-    const sc = statusConfig[status as keyof typeof statusConfig];
-    const columnTasks = tasks
-      .filter(t => t.status === status && !t.parentId)
-      .sort((a, b) => a.order - b.order);
-
-    return (
-      <div key={status} className="flex-1 min-w-[260px] max-w-[320px]">
-        <div className="flex items-center gap-2 mb-2 px-1">
-          <span className={`w-2 h-2 rounded-full ${sc.color}`} />
-          <span className="text-xs font-medium">{sc.label}</span>
-          <Badge variant="secondary" className="text-[10px] h-4 px-1.5 ml-auto">
-            {columnTasks.length}
-          </Badge>
-        </div>
-        <ScrollArea className="h-[calc(100vh-180px)]">
-          <div className="space-y-1.5 pr-2">
-            {columnTasks.map(task => {
-              const pc = priorityConfig[task.priority as keyof typeof priorityConfig] || priorityConfig.medium;
-              const subtasks = getSubtasks(task.id);
-              return (
-                <Card
-                  key={task.id}
-                  className="p-3 cursor-pointer hover:border-primary/30 transition-colors"
-                  onClick={() => setEditingTask(task)}
-                  data-testid={`kanban-card-${task.id}`}
-                >
-                  <div className="flex items-start gap-2">
-                    <Checkbox
-                      checked={task.status === "done"}
-                      onCheckedChange={(e) => {
-                        e; // prevent card click
-                        toggleDone(task);
-                      }}
-                      className="mt-0.5 shrink-0"
-                      onClick={(e) => e.stopPropagation()}
-                    />
-                    <div className="flex-1 min-w-0">
-                      <p className={`text-xs font-medium ${task.status === "done" ? "line-through text-muted-foreground" : ""}`}>
-                        {task.title}
-                      </p>
-                      {task.description && (
-                        <p className="text-[10px] text-muted-foreground mt-0.5 truncate">{task.description}</p>
-                      )}
-                      <div className="flex items-center gap-2 mt-1.5">
-                        <Flag className={`w-2.5 h-2.5 ${pc.color}`} />
-                        {task.dueDate && (
-                          <span className="text-[9px] text-muted-foreground flex items-center gap-0.5">
-                            <Calendar className="w-2.5 h-2.5" />
-                            {new Date(task.dueDate).toLocaleDateString()}
-                          </span>
-                        )}
-                        {subtasks.length > 0 && (
-                          <span className="text-[9px] text-muted-foreground">
-                            {subtasks.filter(s => s.status === "done").length}/{subtasks.length}
-                          </span>
-                        )}
-                      </div>
-                    </div>
-                  </div>
-                </Card>
-              );
-            })}
-            {columnTasks.length === 0 && (
-              <div className="text-center py-8 text-[10px] text-muted-foreground/50">
-                No tasks
-              </div>
+            )}
+            {task.dueDate && (
+              <span className="text-[10px] text-muted-foreground flex items-center gap-0.5">
+                <Calendar className="w-2.5 h-2.5" />
+                {new Date(task.dueDate).toLocaleDateString("en-US", { month: "short", day: "numeric" })}
+              </span>
+            )}
+            {subtasks.length > 0 && (
+              <span className="text-[10px] text-muted-foreground/50">
+                {subtasks.filter(s => s.status === "done").length}/{subtasks.length}
+              </span>
             )}
           </div>
-        </ScrollArea>
+        </div>
+        {subtasks.map(st => renderListRow(st, indent + 1))}
       </div>
     );
   };
 
   return (
     <div className="flex-1 flex flex-col h-full">
+      {/* Header */}
       <header className="flex items-center gap-2 px-4 h-12 border-b border-border/50 shrink-0">
         <SidebarTrigger />
         <CheckSquare className="w-4 h-4 text-muted-foreground" />
@@ -317,7 +819,13 @@ export default function TasksPage() {
           >
             <MessageSquare className="w-3.5 h-3.5" /> AI
           </Button>
-          <Button size="sm" variant="default" className="text-xs gap-1" onClick={() => setShowNewTask(true)} data-testid="button-new-task">
+          <Button
+            size="sm"
+            variant="default"
+            className="text-xs gap-1"
+            onClick={() => { setNewTaskStatus("todo"); setShowNewTask(true); }}
+            data-testid="button-new-task"
+          >
             <Plus className="w-3.5 h-3.5" /> New Task
           </Button>
         </div>
@@ -326,9 +834,39 @@ export default function TasksPage() {
       <div className="flex-1 flex min-h-0">
         <div className="flex-1 overflow-auto p-4">
           {view === "kanban" ? (
-            <div className="flex gap-4 h-full">
-              {["todo", "in_progress", "done"].map(s => renderKanbanColumn(s))}
-            </div>
+            <DndContext
+              sensors={sensors}
+              collisionDetection={closestCorners}
+              onDragStart={handleDragStart}
+              onDragEnd={handleDragEnd}
+              onDragOver={handleDragOver}
+            >
+              <div className="flex gap-4 h-full">
+                {(["todo", "in_progress", "done"] as const).map(status => (
+                  <KanbanColumn
+                    key={status}
+                    status={status}
+                    tasks={tasksByStatus[status] || []}
+                    allTasks={tasks}
+                    onOpen={setDetailTask}
+                    onToggle={toggleDone}
+                    onAddTask={handleAddTaskInColumn}
+                  />
+                ))}
+              </div>
+              <DragOverlay>
+                {activeTask ? (
+                  <div className="rounded-lg border border-primary/30 bg-card p-3 shadow-lg w-[280px] opacity-90">
+                    <p className="text-[13px] font-medium">{activeTask.title}</p>
+                    {activeTask.description && (
+                      <p className="text-[11px] text-muted-foreground mt-1 line-clamp-1">
+                        {activeTask.description.slice(0, 60)}
+                      </p>
+                    )}
+                  </div>
+                ) : null}
+              </DragOverlay>
+            </DndContext>
           ) : (
             <div className="max-w-3xl mx-auto">
               {topLevelTasks.length === 0 && (
@@ -337,7 +875,7 @@ export default function TasksPage() {
                   <p className="text-sm text-muted-foreground">No tasks yet. Create one to get started.</p>
                 </div>
               )}
-              {topLevelTasks.map(t => renderTaskCard(t))}
+              {topLevelTasks.map(t => renderListRow(t))}
             </div>
           )}
         </div>
@@ -356,149 +894,131 @@ export default function TasksPage() {
         />
       </div>
 
-      {/* New task dialog */}
-      <Dialog open={showNewTask} onOpenChange={setShowNewTask}>
-        <DialogContent className="sm:max-w-md">
-          <DialogHeader>
-            <DialogTitle className="text-sm">New Task</DialogTitle>
-          </DialogHeader>
-          <div className="space-y-3">
-            <Input
-              placeholder="Task title"
-              value={newTitle}
-              onChange={(e) => setNewTitle(e.target.value)}
-              className="text-sm"
-              data-testid="input-new-task-title"
-            />
-            <Textarea
-              placeholder="Description (optional)"
-              value={newDesc}
-              onChange={(e) => setNewDesc(e.target.value)}
-              className="text-sm min-h-[60px]"
-              data-testid="input-new-task-desc"
-            />
-            <div className="grid grid-cols-2 gap-2">
-              <Select value={newPriority} onValueChange={setNewPriority}>
-                <SelectTrigger className="text-sm">
-                  <SelectValue placeholder="Priority" />
-                </SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="low">Low</SelectItem>
-                  <SelectItem value="medium">Medium</SelectItem>
-                  <SelectItem value="high">High</SelectItem>
-                  <SelectItem value="urgent">Urgent</SelectItem>
-                </SelectContent>
-              </Select>
-              <Input
-                type="date"
-                value={newDueDate}
-                onChange={(e) => setNewDueDate(e.target.value)}
-                className="text-sm"
-              />
-            </div>
-            {tasks.filter(t => !t.parentId).length > 0 && (
-              <Select value={newParentId} onValueChange={setNewParentId}>
-                <SelectTrigger className="text-sm">
-                  <SelectValue placeholder="Parent task (optional)" />
-                </SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="none">No parent</SelectItem>
-                  {tasks.filter(t => !t.parentId).map(t => (
-                    <SelectItem key={t.id} value={t.id}>{t.title}</SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
-            )}
-            <Button
-              className="w-full text-sm"
-              onClick={() => createTask.mutate({
-                title: newTitle || "Untitled Task",
-                description: newDesc,
-                priority: newPriority,
-                dueDate: newDueDate || null,
-                parentId: newParentId && newParentId !== "none" ? newParentId : null,
-              })}
-              data-testid="button-create-task"
-            >
-              Create Task
-            </Button>
+      {/* New task dialog (using Sheet for consistency) */}
+      <Sheet open={showNewTask} onOpenChange={setShowNewTask}>
+        <SheetContent side="right" className="w-full sm:max-w-md p-0 flex flex-col border-l border-border/50">
+          <SheetHeader className="sr-only">
+            <SheetTitle>New Task</SheetTitle>
+            <SheetDescription>Create a new task</SheetDescription>
+          </SheetHeader>
+          <div className="flex items-center gap-2 px-5 h-14 border-b border-border/50 shrink-0">
+            <Plus className="w-4 h-4 text-muted-foreground" />
+            <span className="text-sm font-medium">New Task</span>
           </div>
-        </DialogContent>
-      </Dialog>
-
-      {/* Edit task dialog */}
-      <Dialog open={!!editingTask} onOpenChange={(open) => !open && setEditingTask(null)}>
-        {editingTask && (
-          <DialogContent className="sm:max-w-md">
-            <DialogHeader>
-              <DialogTitle className="text-sm">Edit Task</DialogTitle>
-            </DialogHeader>
-            <div className="space-y-3">
-              <Input
-                value={editingTask.title}
-                onChange={(e) => setEditingTask({ ...editingTask, title: e.target.value })}
-                className="text-sm"
-                data-testid="input-edit-task-title"
-              />
-              <Textarea
-                value={editingTask.description}
-                onChange={(e) => setEditingTask({ ...editingTask, description: e.target.value })}
-                className="text-sm min-h-[60px]"
-              />
-              <div className="grid grid-cols-2 gap-2">
-                <Select value={editingTask.status} onValueChange={(v) => setEditingTask({ ...editingTask, status: v })}>
-                  <SelectTrigger className="text-sm">
-                    <SelectValue />
-                  </SelectTrigger>
-                  <SelectContent>
-                    <SelectItem value="todo">To Do</SelectItem>
-                    <SelectItem value="in_progress">In Progress</SelectItem>
-                    <SelectItem value="done">Done</SelectItem>
-                    <SelectItem value="archived">Archived</SelectItem>
-                  </SelectContent>
-                </Select>
-                <Select value={editingTask.priority} onValueChange={(v) => setEditingTask({ ...editingTask, priority: v })}>
-                  <SelectTrigger className="text-sm">
-                    <SelectValue />
-                  </SelectTrigger>
-                  <SelectContent>
-                    <SelectItem value="low">Low</SelectItem>
-                    <SelectItem value="medium">Medium</SelectItem>
-                    <SelectItem value="high">High</SelectItem>
-                    <SelectItem value="urgent">Urgent</SelectItem>
-                  </SelectContent>
-                </Select>
+          <ScrollArea className="flex-1">
+            <div className="px-5 py-5 space-y-4">
+              <div className="space-y-1">
+                <label className="text-[10px] uppercase tracking-wider text-muted-foreground/60 font-medium">Title</label>
+                <Input
+                  placeholder="What needs to be done?"
+                  value={newTitle}
+                  onChange={(e) => setNewTitle(e.target.value)}
+                  className="text-sm"
+                  autoFocus
+                  data-testid="input-new-task-title"
+                />
               </div>
-              <div className="flex gap-2">
-                <Button
-                  className="flex-1 text-sm"
-                  onClick={() => {
-                    updateTask.mutate({
-                      id: editingTask.id,
-                      title: editingTask.title,
-                      description: editingTask.description,
-                      status: editingTask.status,
-                      priority: editingTask.priority,
-                    });
-                    setEditingTask(null);
-                    toast({ title: "Task updated" });
-                  }}
-                  data-testid="button-update-task"
-                >
-                  Save
-                </Button>
-                <Button
-                  variant="destructive"
-                  size="icon"
-                  onClick={() => deleteTask.mutate(editingTask.id)}
-                >
-                  <Trash2 className="w-3.5 h-3.5" />
-                </Button>
+              <div className="space-y-1">
+                <label className="text-[10px] uppercase tracking-wider text-muted-foreground/60 font-medium">Description</label>
+                <Textarea
+                  placeholder="Add details (supports markdown)..."
+                  value={newDesc}
+                  onChange={(e) => setNewDesc(e.target.value)}
+                  className="text-sm min-h-[120px] font-mono"
+                  data-testid="input-new-task-desc"
+                />
               </div>
+              <div className="grid grid-cols-2 gap-3">
+                <div className="space-y-1">
+                  <label className="text-[10px] uppercase tracking-wider text-muted-foreground/60 font-medium">Status</label>
+                  <Select value={newTaskStatus} onValueChange={setNewTaskStatus}>
+                    <SelectTrigger className="text-xs h-8">
+                      <SelectValue />
+                    </SelectTrigger>
+                    <SelectContent>
+                      {Object.entries(statusConfig).filter(([k]) => k !== "archived").map(([key, cfg]) => (
+                        <SelectItem key={key} value={key}>
+                          <span className="flex items-center gap-1.5">
+                            <cfg.icon className={`w-3 h-3 ${cfg.color}`} />
+                            {cfg.label}
+                          </span>
+                        </SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                </div>
+                <div className="space-y-1">
+                  <label className="text-[10px] uppercase tracking-wider text-muted-foreground/60 font-medium">Priority</label>
+                  <Select value={newPriority} onValueChange={setNewPriority}>
+                    <SelectTrigger className="text-xs h-8">
+                      <SelectValue />
+                    </SelectTrigger>
+                    <SelectContent>
+                      {Object.entries(priorityConfig).map(([key, cfg]) => (
+                        <SelectItem key={key} value={key}>
+                          <span className="flex items-center gap-1.5">
+                            <span className={`w-2 h-2 rounded-full ${cfg.dotColor}`} />
+                            {cfg.label}
+                          </span>
+                        </SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                </div>
+              </div>
+              <div className="space-y-1">
+                <label className="text-[10px] uppercase tracking-wider text-muted-foreground/60 font-medium">Due Date</label>
+                <Input
+                  type="date"
+                  value={newDueDate}
+                  onChange={(e) => setNewDueDate(e.target.value)}
+                  className="text-xs h-8"
+                />
+              </div>
+              {tasks.filter(t => !t.parentId).length > 0 && (
+                <div className="space-y-1">
+                  <label className="text-[10px] uppercase tracking-wider text-muted-foreground/60 font-medium">Parent Task</label>
+                  <Select value={newParentId} onValueChange={setNewParentId}>
+                    <SelectTrigger className="text-xs h-8">
+                      <SelectValue placeholder="None" />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="none">No parent</SelectItem>
+                      {tasks.filter(t => !t.parentId).map(t => (
+                        <SelectItem key={t.id} value={t.id}>{t.title}</SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                </div>
+              )}
+              <Button
+                className="w-full text-sm mt-2"
+                onClick={() => createTask.mutate({
+                  title: newTitle || "Untitled Task",
+                  description: newDesc,
+                  status: newTaskStatus,
+                  priority: newPriority,
+                  dueDate: newDueDate || null,
+                  parentId: newParentId && newParentId !== "none" ? newParentId : null,
+                })}
+                data-testid="button-create-task"
+              >
+                Create Task
+              </Button>
             </div>
-          </DialogContent>
-        )}
-      </Dialog>
+          </ScrollArea>
+        </SheetContent>
+      </Sheet>
+
+      {/* Task detail slide-over */}
+      <TaskDetailPanel
+        task={detailTask}
+        allTasks={tasks}
+        open={!!detailTask}
+        onClose={() => setDetailTask(null)}
+        onUpdate={(data) => updateTask.mutate(data)}
+        onDelete={(id) => deleteTask.mutate(id)}
+      />
     </div>
   );
 }
