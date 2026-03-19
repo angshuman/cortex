@@ -162,6 +162,55 @@ export class FileStorage {
     return path.join(this.dataDir, "chat", "assets", filename);
   }
 
+  // ============ FILES (user-uploaded file storage) ============
+  private filesDir() { return path.join(this.dataDir, "files"); }
+  private filesMetaPath() { return path.join(this.filesDir(), "_meta.json"); }
+
+  getFiles(): Array<{ id: string; name: string; size: number; mimeType: string; createdAt: string }> {
+    return readJson(this.filesMetaPath(), []);
+  }
+
+  saveFile(id: string, originalName: string, mimeType: string, buffer: Buffer): { id: string; name: string; size: number; mimeType: string; createdAt: string; url: string } {
+    const dir = this.filesDir();
+    ensureDir(dir);
+    const ext = path.extname(originalName);
+    const storedName = `${id}${ext}`;
+    fs.writeFileSync(path.join(dir, storedName), buffer);
+    const meta = {
+      id,
+      name: originalName,
+      storedName,
+      size: buffer.length,
+      mimeType,
+      createdAt: new Date().toISOString(),
+    };
+    const files = this.getFiles() as any[];
+    files.push(meta);
+    writeJson(this.filesMetaPath(), files);
+    return { ...meta, url: `/api/files/${id}/${encodeURIComponent(originalName)}` };
+  }
+
+  getFile(id: string): { buffer: Buffer; name: string; mimeType: string } | null {
+    const files = readJson(this.filesMetaPath(), []) as any[];
+    const meta = files.find((f: any) => f.id === id);
+    if (!meta) return null;
+    const filePath = path.join(this.filesDir(), meta.storedName);
+    if (!fs.existsSync(filePath)) return null;
+    return { buffer: fs.readFileSync(filePath), name: meta.name, mimeType: meta.mimeType };
+  }
+
+  deleteFile(id: string): boolean {
+    const files = readJson(this.filesMetaPath(), []) as any[];
+    const idx = files.findIndex((f: any) => f.id === id);
+    if (idx === -1) return false;
+    const meta = files[idx];
+    const filePath = path.join(this.filesDir(), meta.storedName);
+    if (fs.existsSync(filePath)) fs.unlinkSync(filePath);
+    files.splice(idx, 1);
+    writeJson(this.filesMetaPath(), files);
+    return true;
+  }
+
   // ============ TASKS ============
   private tasksPath() { return path.join(this.dataDir, "tasks", "tasks.json"); }
 

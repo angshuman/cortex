@@ -12,6 +12,7 @@ import NotesPage from "@/pages/notes";
 import TasksPage from "@/pages/tasks";
 import SearchPage from "@/pages/search";
 import SettingsPage from "@/pages/settings";
+import FilesPage from "@/pages/files";
 import NotFound from "@/pages/not-found";
 import { ThemeProvider } from "@/components/theme-provider";
 import { VaultProvider } from "@/hooks/use-vault";
@@ -24,6 +25,7 @@ function AppRouter() {
       <Route path="/chat/:id" component={ChatPage} />
       <Route path="/notes" component={NotesPage} />
       <Route path="/tasks" component={TasksPage} />
+      <Route path="/files" component={FilesPage} />
       <Route path="/search" component={SearchPage} />
       <Route path="/settings" component={SettingsPage} />
       <Route component={NotFound} />

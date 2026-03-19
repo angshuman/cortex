@@ -239,6 +239,63 @@ export function registerRoutes(server: Server, app: Express) {
     res.send(buffer);
   });
 
+  // ============ FILES (vault-scoped) ============
+  app.get("/api/files", (req, res) => {
+    const store = getVaultStorage(req);
+    const files = store.getFiles();
+    // Add url to each file
+    res.json(files.map((f: any) => ({ ...f, url: `/api/files/${f.id}/${encodeURIComponent(f.name)}` })));
+  });
+
+  app.post("/api/files", upload.single("file"), (req: any, res: any) => {
+    const store = getVaultStorage(req);
+    if (!req.file) return res.status(400).json({ error: "No file" });
+    const id = crypto.randomUUID();
+    const result = store.saveFile(id, req.file.originalname, req.file.mimetype, req.file.buffer);
+    res.status(201).json(result);
+  });
+
+  app.get("/api/files/:id/:filename", (req, res) => {
+    const store = getVaultStorage(req);
+    const file = store.getFile(req.params.id as string);
+    if (!file) return res.status(404).end();
+    res.setHeader("Content-Type", file.mimeType);
+    res.setHeader("Content-Disposition", `inline; filename="${file.name}"`);
+    res.send(file.buffer);
+  });
+
+  app.delete("/api/files/:id", (req, res) => {
+    const store = getVaultStorage(req);
+    const ok = store.deleteFile(req.params.id as string);
+    if (!ok) return res.status(404).json({ error: "File not found" });
+    res.json({ success: true });
+  });
+
+  // Create a note from a file
+  app.post("/api/files/:id/create-note", (req, res) => {
+    const store = getVaultStorage(req);
+    const files = store.getFiles() as any[];
+    const fileMeta = files.find((f: any) => f.id === req.params.id);
+    if (!fileMeta) return res.status(404).json({ error: "File not found" });
+
+    const isImage = fileMeta.mimeType?.startsWith("image/");
+    const fileUrl = `/api/files/${fileMeta.id}/${encodeURIComponent(fileMeta.name)}`;
+    let content = "";
+    if (isImage) {
+      content = `![${fileMeta.name}](${fileUrl})\n`;
+    } else {
+      content = `[${fileMeta.name}](${fileUrl})\n`;
+    }
+
+    const note = store.createNote({
+      title: fileMeta.name.replace(/\.[^.]+$/, ""),
+      content,
+      folder: "/files",
+      attachments: [fileUrl],
+    });
+    res.status(201).json(note);
+  });
+
   // ============ SKILLS (vault-scoped) ============
   app.get("/api/skills", (req, res) => {
     const store = getVaultStorage(req);

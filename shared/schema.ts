@@ -54,7 +54,7 @@ export const insertNoteSchema = z.object({
 export type InsertNote = z.infer<typeof insertNoteSchema>;
 
 // ============ TASKS ============
-export const taskStatusEnum = z.enum(["todo", "in_progress", "done", "archived"]);
+export const taskStatusEnum = z.enum(["todo", "in_progress", "done", "closed", "archived"]);
 export const taskPriorityEnum = z.enum(["low", "medium", "high", "urgent"]);
 
 export const taskSchema = z.object({

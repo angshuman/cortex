@@ -314,7 +314,7 @@ export function ContextChat({ context, open, onClose, placeholder }: ContextChat
   if (!open) return null;
 
   return (
-    <div className="w-80 border-l border-border/50 flex flex-col bg-background shrink-0 h-full" data-testid="context-chat-panel">
+    <div className="w-[400px] border-l border-border/50 flex flex-col bg-background shrink-0 h-full" data-testid="context-chat-panel">
       {/* Header */}
       <div className="flex items-center gap-2 px-3 h-10 border-b border-border/50 shrink-0">
         <MessageSquare className="w-3.5 h-3.5 text-primary" />
@@ -339,47 +339,46 @@ export function ContextChat({ context, open, onClose, placeholder }: ContextChat
       {/* Messages */}
       <div ref={scrollRef} className="flex-1 overflow-y-auto px-3 py-3">
         {events.length === 0 && (
-          <div className="flex flex-col items-center justify-center h-full text-center">
-            <div className="w-10 h-10 rounded-xl bg-primary/10 flex items-center justify-center mb-2">
-              <Brain className="w-5 h-5 text-primary" />
+          <div className="flex flex-col items-center justify-center h-full text-center px-4">
+            <div className="w-8 h-8 rounded-full bg-primary/5 flex items-center justify-center mb-2">
+              <Sparkles className="w-3.5 h-3.5 text-primary/30" />
             </div>
-            <p className="text-[10px] text-muted-foreground max-w-[200px]">
+            <p className="text-xs text-muted-foreground/40">
               {context.length > 0
-                ? `Ask about ${context.length === 1 ? `"${context[0].title}"` : `these ${context.length} items`}`
-                : "Ask anything..."}
+                ? `${context.length} item${context.length > 1 ? "s" : ""} in context`
+                : "No context selected"}
+            </p>
+            <p className="text-[10px] text-muted-foreground/25 mt-1">
+              {context.length > 0 ? "Ask a question to get started" : "Select items to chat about them"}
             </p>
           </div>
         )}
         {events.map((e, i) => renderEvent(e, i))}
-        {status === "thinking" && events.length > 0 && (
+        {status === "thinking" && (
           <div className="flex mb-2 gap-2 items-center">
-            <div className="flex-shrink-0 w-6 h-6 rounded-full bg-primary/10 flex items-center justify-center">
+            <div className="flex-shrink-0 w-5 h-5 rounded-full bg-primary/10 flex items-center justify-center">
               <Loader2 className="w-3 h-3 text-primary animate-spin" />
             </div>
-            <div className="flex gap-1">
-              <span className="w-1 h-1 rounded-full bg-primary/40 animate-bounce" style={{ animationDelay: "0ms" }} />
-              <span className="w-1 h-1 rounded-full bg-primary/40 animate-bounce" style={{ animationDelay: "150ms" }} />
-              <span className="w-1 h-1 rounded-full bg-primary/40 animate-bounce" style={{ animationDelay: "300ms" }} />
-            </div>
+            <span className="text-[10px] text-muted-foreground/60">Thinking...</span>
           </div>
         )}
       </div>
 
       {/* Input */}
       <div
-        className="border-t border-border/50 p-2 shrink-0"
+        className="border-t border-border/50 p-2.5 shrink-0"
         onDrop={handleDrop}
         onDragOver={handleDragOver}
       >
         {/* Image previews */}
         {pendingImages.length > 0 && (
-          <div className="flex flex-wrap gap-1.5 mb-1.5 px-0.5">
+          <div className="flex flex-wrap gap-1.5 mb-2 px-0.5">
             {pendingImages.map(img => (
               <div key={img.id} className="relative group">
                 <img
                   src={img.preview}
                   alt="preview"
-                  className={`h-12 w-12 rounded-md object-cover border border-border/50 ${img.uploading ? "opacity-50" : ""}`}
+                  className={`h-10 w-10 rounded object-cover border border-border/50 ${img.uploading ? "opacity-50" : ""}`}
                 />
                 {img.uploading && (
                   <div className="absolute inset-0 flex items-center justify-center">
@@ -396,7 +395,7 @@ export function ContextChat({ context, open, onClose, placeholder }: ContextChat
             ))}
           </div>
         )}
-        <div className="relative flex items-end gap-1.5 bg-muted/50 rounded-lg border border-border/50 p-1.5 focus-within:border-primary/50 transition-colors">
+        <div className="relative flex items-end gap-1 bg-muted/40 rounded-lg border border-border/40 px-2 py-1.5 focus-within:border-primary/40 transition-colors input-glow">
           <input
             ref={fileInputRef}
             type="file"
@@ -412,7 +411,7 @@ export function ContextChat({ context, open, onClose, placeholder }: ContextChat
           <Button
             variant="ghost"
             size="icon"
-            className="shrink-0 h-6 w-6 rounded-md text-muted-foreground hover:text-foreground"
+            className="shrink-0 h-5 w-5 rounded text-muted-foreground/50 hover:text-foreground"
             onClick={() => fileInputRef.current?.click()}
             data-testid="button-context-attach"
             title="Attach image"
@@ -425,19 +424,19 @@ export function ContextChat({ context, open, onClose, placeholder }: ContextChat
             onChange={(e) => setInput(e.target.value)}
             onKeyDown={handleKeyDown}
             onPaste={handlePaste}
-            placeholder={placeholder || "Ask about this... (paste images)"}
-            className="min-h-[32px] max-h-[80px] resize-none border-0 bg-transparent focus-visible:ring-0 focus-visible:ring-offset-0 text-xs p-0.5"
+            placeholder={placeholder || "Ask anything..."}
+            className="min-h-[24px] max-h-[72px] resize-none border-0 bg-transparent focus-visible:ring-0 focus-visible:ring-offset-0 text-xs p-0 leading-relaxed"
             rows={1}
             data-testid="input-context-chat"
           />
           <Button
             size="icon"
-            className="shrink-0 h-6 w-6 rounded-md"
+            className="shrink-0 h-5 w-5 rounded"
             onClick={handleSend}
             disabled={(!input.trim() && !hasImages) || status === "thinking" || isUploading}
             data-testid="button-context-send"
           >
-            <Send className="w-3 h-3" />
+            <Send className="w-2.5 h-2.5" />
           </Button>
         </div>
       </div>

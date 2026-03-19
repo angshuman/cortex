@@ -244,7 +244,7 @@ export default function NotesPage() {
   const [showNewNote, setShowNewNote] = useState(false);
   const [newTitle, setNewTitle] = useState("");
   const [newFolder, setNewFolder] = useState("/");
-  const [chatOpen, setChatOpen] = useState(false);
+  const [chatOpen, setChatOpen] = useState(true);
   const [viewMode, setViewMode] = useState<"edit" | "preview">("edit");
   const fileInputRef = useRef<HTMLInputElement>(null);
   const dumpFileRef = useRef<HTMLInputElement>(null);
@@ -411,7 +411,7 @@ export default function NotesPage() {
 
       <div className="flex-1 flex min-h-0">
         {/* Sidebar: Folders + Note list */}
-        <div className="w-72 border-r border-border/50 flex flex-col shrink-0">
+        <div className="w-[280px] border-r border-border/50 flex flex-col shrink-0">
           <div className="p-2 space-y-2">
             {/* Search */}
             <div className="relative">
@@ -445,8 +445,11 @@ export default function NotesPage() {
             <div className="p-1.5 space-y-0.5">
               {filteredNotes.length === 0 && (
                 <div className="text-center py-12">
-                  <FileText className="w-8 h-8 text-muted-foreground/20 mx-auto mb-2" />
-                  <p className="text-[11px] text-muted-foreground/40">No notes</p>
+                  <div className="w-10 h-10 rounded-xl bg-muted/20 flex items-center justify-center mx-auto mb-2">
+                    <FileText className="w-4.5 h-4.5 text-muted-foreground/20" />
+                  </div>
+                  <p className="text-[11px] text-muted-foreground/40">No notes yet</p>
+                  <p className="text-[10px] text-muted-foreground/25 mt-0.5">Create one to get started</p>
                 </div>
               )}
               {filteredNotes.map(note => (
@@ -462,13 +465,15 @@ export default function NotesPage() {
         </div>
 
         {/* Note content area */}
-        <div className={`flex-1 flex flex-col min-w-0 ${chatOpen ? "max-w-[calc(100%-20rem-18rem)]" : ""}`}>
+        <div className={`flex-1 flex flex-col min-w-0 ${chatOpen ? "max-w-[calc(100%-280px-400px)]" : ""}`}>
           {!selectedNote ? (
             <div className="flex-1 flex items-center justify-center">
               <div className="text-center">
-                <FileText className="w-12 h-12 text-muted-foreground/15 mx-auto mb-3" />
+                <div className="w-14 h-14 rounded-2xl bg-muted/20 border border-dashed border-border/40 flex items-center justify-center mx-auto mb-3">
+                  <FileText className="w-6 h-6 text-muted-foreground/20" />
+                </div>
                 <p className="text-sm text-muted-foreground/50">Select or create a note</p>
-                <p className="text-[11px] text-muted-foreground/30 mt-1">Your notes support full markdown with images</p>
+                <p className="text-[11px] text-muted-foreground/25 mt-1">Full markdown with images, Ctrl+V to paste</p>
               </div>
             </div>
           ) : (

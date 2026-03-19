@@ -43,7 +43,15 @@ import {
   Save,
   Tag,
   MoreHorizontal,
+  XCircle,
+  Filter,
+  Check,
 } from "lucide-react";
+import {
+  Popover,
+  PopoverContent,
+  PopoverTrigger,
+} from "@/components/ui/popover";
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -94,8 +102,12 @@ const statusConfig: Record<string, { label: string; icon: typeof Circle; color: 
   todo: { label: "To Do", icon: Circle, color: "text-zinc-400", bgColor: "bg-zinc-400" },
   in_progress: { label: "In Progress", icon: Clock, color: "text-amber-500", bgColor: "bg-amber-500" },
   done: { label: "Done", icon: CheckCircle2, color: "text-emerald-500", bgColor: "bg-emerald-500" },
+  closed: { label: "Closed", icon: XCircle, color: "text-violet-500", bgColor: "bg-violet-500" },
   archived: { label: "Archived", icon: Archive, color: "text-zinc-500", bgColor: "bg-zinc-500" },
 };
+
+const KANBAN_STATUSES = ["todo", "in_progress", "done", "closed"] as const;
+const DEFAULT_VISIBLE_STATUSES = ["todo", "in_progress", "done"];
 
 const priorityConfig: Record<string, { label: string; color: string; dotColor: string }> = {
   low: { label: "Low", color: "text-zinc-400", dotColor: "bg-zinc-400" },
@@ -140,7 +152,7 @@ function SortableTaskCard({
     <div
       ref={setNodeRef}
       style={style}
-      className="group relative rounded-lg border border-border/50 bg-card p-3 hover:border-border transition-colors cursor-pointer"
+      className="group relative rounded-lg border border-border/50 bg-card p-3 card-hover cursor-pointer"
       onClick={() => onOpen(task)}
       data-testid={`kanban-card-${task.id}`}
     >
@@ -251,8 +263,9 @@ function KanbanColumn({
                 );
               })}
               {tasks.length === 0 && (
-                <div className="text-center py-12">
-                  <p className="text-[11px] text-muted-foreground/40">No tasks</p>
+                <div className="text-center py-8">
+                  <StatusIcon className={`w-5 h-5 ${sc.color} opacity-20 mx-auto mb-1.5`} />
+                  <p className="text-[11px] text-muted-foreground/30">No tasks</p>
                 </div>
               )}
             </div>
@@ -562,8 +575,8 @@ export default function TasksPage() {
   const [newPriority, setNewPriority] = useState("medium");
   const [newDueDate, setNewDueDate] = useState("");
   const [newParentId, setNewParentId] = useState<string>("");
-  const [filterStatus, setFilterStatus] = useState<string>("all");
-  const [chatOpen, setChatOpen] = useState(false);
+  const [filterStatuses, setFilterStatuses] = useState<Set<string>>(new Set(DEFAULT_VISIBLE_STATUSES));
+  const [chatOpen, setChatOpen] = useState(true);
   const [activeId, setActiveId] = useState<string | null>(null);
   const queryClient = useQueryClient();
   const { toast } = useToast();
@@ -630,23 +643,39 @@ export default function TasksPage() {
     });
   }, [updateTask]);
 
-  // Organize tasks by status for kanban
+  const toggleFilterStatus = useCallback((status: string) => {
+    setFilterStatuses(prev => {
+      const next = new Set(prev);
+      if (next.has(status)) {
+        // Don't allow empty — keep at least one
+        if (next.size > 1) next.delete(status);
+      } else {
+        next.add(status);
+      }
+      return next;
+    });
+  }, []);
+
+  // Organize tasks by status for kanban (only show columns for active filters)
   const tasksByStatus = useMemo(() => {
-    const groups: Record<string, Task[]> = { todo: [], in_progress: [], done: [] };
+    const groups: Record<string, Task[]> = {};
+    for (const s of KANBAN_STATUSES) {
+      if (filterStatuses.has(s)) groups[s] = [];
+    }
     tasks
-      .filter(t => !t.parentId && t.status !== "archived")
+      .filter(t => !t.parentId && filterStatuses.has(t.status))
       .sort((a, b) => a.order - b.order)
       .forEach(t => {
         if (groups[t.status]) groups[t.status].push(t);
       });
     return groups;
-  }, [tasks]);
+  }, [tasks, filterStatuses]);
 
   const filteredTasks = useMemo(() =>
     tasks
-      .filter(t => filterStatus === "all" || t.status === filterStatus)
+      .filter(t => filterStatuses.has(t.status))
       .sort((a, b) => a.order - b.order),
-    [tasks, filterStatus]
+    [tasks, filterStatuses]
   );
 
   const topLevelTasks = filteredTasks.filter(t => !t.parentId);
@@ -779,19 +808,40 @@ export default function TasksPage() {
         <CheckSquare className="w-4 h-4 text-muted-foreground" />
         <span className="text-sm font-medium">Tasks</span>
         <div className="ml-auto flex items-center gap-2">
-          {view === "list" && (
-            <Select value={filterStatus} onValueChange={setFilterStatus}>
-              <SelectTrigger className="h-7 text-xs w-28">
-                <SelectValue placeholder="Filter" />
-              </SelectTrigger>
-              <SelectContent>
-                <SelectItem value="all">All</SelectItem>
-                <SelectItem value="todo">To Do</SelectItem>
-                <SelectItem value="in_progress">In Progress</SelectItem>
-                <SelectItem value="done">Done</SelectItem>
-              </SelectContent>
-            </Select>
-          )}
+          <Popover>
+            <PopoverTrigger asChild>
+              <Button variant="ghost" size="sm" className="h-7 text-xs gap-1.5">
+                <Filter className="w-3 h-3" />
+                <span>Filter</span>
+                {filterStatuses.size < Object.keys(statusConfig).length && (
+                  <Badge variant="secondary" className="text-[9px] px-1 py-0 h-3.5 font-normal ml-0.5">
+                    {filterStatuses.size}
+                  </Badge>
+                )}
+              </Button>
+            </PopoverTrigger>
+            <PopoverContent align="end" className="w-48 p-1">
+              {Object.entries(statusConfig).map(([key, cfg]) => {
+                const isSelected = filterStatuses.has(key);
+                return (
+                  <button
+                    key={key}
+                    onClick={() => toggleFilterStatus(key)}
+                    className="flex items-center gap-2 w-full px-2.5 py-1.5 text-xs rounded-md hover:bg-muted/60 transition-colors"
+                    data-testid={`filter-status-${key}`}
+                  >
+                    <span className={`w-3.5 h-3.5 rounded border flex items-center justify-center transition-colors ${
+                      isSelected ? "bg-primary border-primary text-primary-foreground" : "border-border"
+                    }`}>
+                      {isSelected && <Check className="w-2.5 h-2.5" />}
+                    </span>
+                    <cfg.icon className={`w-3 h-3 ${cfg.color}`} />
+                    <span className="flex-1 text-left">{cfg.label}</span>
+                  </button>
+                );
+              })}
+            </PopoverContent>
+          </Popover>
           <div className="flex rounded-md border border-border/50">
             <Button
               size="sm"
@@ -842,7 +892,7 @@ export default function TasksPage() {
               onDragOver={handleDragOver}
             >
               <div className="flex gap-4 h-full">
-                {(["todo", "in_progress", "done"] as const).map(status => (
+                {Object.keys(tasksByStatus).map(status => (
                   <KanbanColumn
                     key={status}
                     status={status}
