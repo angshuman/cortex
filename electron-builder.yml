@@ -1,0 +1,68 @@
+appId: com.cortex.app
+productName: Cortex
+copyright: Copyright © 2026 Angshuman Sarkar
+
+directories:
+  output: release
+  buildResources: electron/icons
+
+# The Electron entry point
+files:
+  - dist/electron/**/*
+  - dist/public/**/*
+  - "!node_modules/**/*"
+
+# Extra resources (not inside asar) — the Express server needs fs access
+extraResources:
+  - from: dist/index.cjs
+    to: server/index.cjs
+  - from: electron/icons
+    to: icons
+
+# The main entry for Electron
+main: dist/electron/main.js
+
+# ============ Windows ============
+win:
+  target:
+    - target: nsis
+      arch:
+        - x64
+  icon: electron/icons/icon.png
+
+nsis:
+  oneClick: false
+  allowToChangeInstallationDirectory: true
+  installerIcon: electron/icons/icon.ico
+  uninstallerIcon: electron/icons/icon.ico
+  installerHeaderIcon: electron/icons/icon.ico
+
+# ============ macOS ============
+mac:
+  target:
+    - target: dmg
+      arch:
+        - x64
+        - arm64
+  icon: electron/icons/icon.icns
+  category: public.app-category.productivity
+  darkModeSupport: true
+
+dmg:
+  title: "${productName}"
+
+# ============ Linux ============
+linux:
+  target:
+    - target: AppImage
+      arch:
+        - x64
+    - target: deb
+      arch:
+        - x64
+  icon: electron/icons
+  category: Utility
+  maintainer: s42.ang@gmail.com
+
+# Publish config (disabled — build locally)
+publish: null

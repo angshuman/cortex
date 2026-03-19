@@ -1,6 +1,12 @@
 node_modules/
 dist/
+release/
 .cortex-data/
 *.log
 .env
 .DS_Store
+*.exe
+*.dmg
+*.AppImage
+*.deb
+*.snap

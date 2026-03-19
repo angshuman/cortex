@@ -1,14 +1,23 @@
 {
-  "name": "rest-express",
+  "name": "cortex",
   "version": "1.0.0",
   "type": "module",
   "license": "MIT",
+  "description": "Personal AI operating system — local-first, portable, with notes, tasks, chat, and MCP support",
+  "author": "Angshuman Sarkar <s42.ang@gmail.com>",
+  "main": "dist/electron/main.js",
   "scripts": {
     "dev": "cross-env NODE_ENV=development tsx server/index.ts",
     "build": "tsx script/build.ts",
     "start": "cross-env NODE_ENV=production node dist/index.cjs",
     "check": "tsc",
-    "db:push": "drizzle-kit push"
+    "db:push": "drizzle-kit push",
+    "electron:dev": "npm run build && cross-env ELECTRON=1 electron dist/electron/main.js",
+    "electron:build": "tsx script/build-electron.ts",
+    "electron:pack": "tsx script/build-electron.ts && electron-builder --config electron-builder.yml",
+    "electron:pack:win": "tsx script/build-electron.ts && electron-builder --config electron-builder.yml --win",
+    "electron:pack:mac": "tsx script/build-electron.ts && electron-builder --config electron-builder.yml --mac",
+    "electron:pack:linux": "tsx script/build-electron.ts && electron-builder --config electron-builder.yml --linux"
   },
   "dependencies": {
     "@anthropic-ai/sdk": "^0.79.0",
@@ -107,6 +116,8 @@
     "autoprefixer": "^10.4.20",
     "cross-env": "^10.1.0",
     "drizzle-kit": "^0.31.8",
+    "electron": "^41.0.3",
+    "electron-builder": "^26.8.1",
     "esbuild": "^0.25.0",
     "postcss": "^8.4.47",
     "tailwindcss": "^3.4.17",
