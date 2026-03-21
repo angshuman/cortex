@@ -86,7 +86,7 @@ async function buildAll() {
     platform: "node",
     bundle: true,
     format: "cjs",
-    outfile: "dist/electron/main.js",
+    outfile: "dist/electron/main.cjs",
     minify: false,
     external: ["electron"],
     logLevel: "info",
@@ -97,7 +97,7 @@ async function buildAll() {
     platform: "node",
     bundle: true,
     format: "cjs",
-    outfile: "dist/electron/preload.js",
+    outfile: "dist/electron/preload.cjs",
     minify: false,
     external: ["electron"],
     logLevel: "info",
@@ -113,7 +113,7 @@ async function buildAll() {
   console.log("\n=== Build complete ===");
   console.log("  dist/public/        → Client assets");
   console.log("  dist/index.cjs      → Express server bundle");
-  console.log("  dist/electron/      → Electron main + preload");
+  console.log("  dist/electron/      → Electron main.cjs + preload.cjs");
   console.log("\nRun `npx electron-builder` to package the desktop app.");
 }
 
