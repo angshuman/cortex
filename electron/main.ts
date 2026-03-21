@@ -49,11 +49,12 @@ async function startServer(port: number): Promise<void> {
   process.env.CORTEX_DATA_DIR = getDataDir();
   process.env.ELECTRON = "1";
 
-  // The built server bundle is at dist/index.cjs relative to app root
-  // In packaged app, resources are in app.asar; the server bundle is copied outside
+  // The built server bundle is at dist/index.cjs
+  // __dirname in dev = dist/electron/, so ../index.cjs reaches dist/index.cjs
+  // In packaged app, it's copied to resources/server/index.cjs via extraResources
   const serverPath = app.isPackaged
     ? path.join(process.resourcesPath, "server", "index.cjs")
-    : path.join(__dirname, "..", "dist", "index.cjs");
+    : path.join(__dirname, "..", "index.cjs");
 
   // Import the server — it self-starts via its IIFE
   return new Promise((resolve, reject) => {
