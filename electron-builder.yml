@@ -19,9 +19,6 @@ extraResources:
   - from: electron/icons
     to: icons
 
-# The main entry for Electron
-main: dist/electron/main.js
-
 # ============ Windows ============
 win:
   target:
