@@ -12,7 +12,7 @@
     "start": "cross-env NODE_ENV=production node dist/index.cjs",
     "check": "tsc",
     "db:push": "drizzle-kit push",
-    "electron:dev": "npm run build && cross-env ELECTRON=1 electron dist/electron/main.js",
+    "electron:dev": "tsx script/build-electron.ts && cross-env ELECTRON=1 electron dist/electron/main.js",
     "electron:build": "tsx script/build-electron.ts",
     "electron:pack": "tsx script/build-electron.ts && electron-builder --config electron-builder.yml",
     "electron:pack:win": "tsx script/build-electron.ts && electron-builder --config electron-builder.yml --win",
