@@ -45,7 +45,15 @@ jobs:
       - name: Build app (client + server + electron)
         run: npx tsx script/build-electron.ts
 
-      # On Linux, electron-builder needs additional deps for icon conversion
+      # macOS: import signing certificate if available
+      - name: Import macOS signing certificate
+        if: matrix.platform == 'mac' && env.CSC_LINK != ''
+        env:
+          CSC_LINK: ${{ secrets.MAC_CERT_P12_BASE64 }}
+          CSC_KEY_PASSWORD: ${{ secrets.MAC_CERT_PASSWORD }}
+        run: echo "Certificate imported via electron-builder env vars"
+
+      # Linux: install rpmbuild for broader packaging support
       - name: Install Linux build deps
         if: matrix.platform == 'linux'
         run: |
@@ -55,6 +63,16 @@ jobs:
       - name: Package Electron app
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          # Windows code signing (optional — set secrets to enable)
+          CSC_LINK: ${{ secrets.WIN_CERT_P12_BASE64 }}
+          CSC_KEY_PASSWORD: ${{ secrets.WIN_CERT_PASSWORD }}
+          # macOS code signing (optional — set secrets to enable)
+          CSC_LINK_MAC: ${{ secrets.MAC_CERT_P12_BASE64 }}
+          CSC_KEY_PASSWORD_MAC: ${{ secrets.MAC_CERT_PASSWORD }}
+          # macOS notarization (optional)
+          APPLE_ID: ${{ secrets.APPLE_ID }}
+          APPLE_APP_SPECIFIC_PASSWORD: ${{ secrets.APPLE_APP_SPECIFIC_PASSWORD }}
+          APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
         run: npx electron-builder --config electron-builder.yml --${{ matrix.platform }} --publish always
 
       - name: Upload artifacts
@@ -68,4 +86,5 @@ jobs:
             release/*.deb
             release/*.yml
             release/*.yaml
+            release/*.blockmap
           if-no-files-found: warn

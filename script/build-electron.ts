@@ -3,48 +3,17 @@
  * 
  * Steps:
  * 1. Build the web client (Vite) → dist/public/
- * 2. Build the Express server → dist/index.cjs
+ * 2. Build the Express server → dist/index.cjs (fully self-contained, no externals)
  * 3. Compile Electron main + preload → dist/electron/
  * 
- * After this, run `npx electron-builder` to package.
+ * Unlike the regular build, the Electron server bundle has NO externals
+ * (except Node.js built-ins) so the packaged app works without node_modules.
  */
-import { build as esbuild } from "esbuild";
+import { build as esbuild, BuildOptions } from "esbuild";
 import { build as viteBuild } from "vite";
-import { rm, readFile, mkdir, cp } from "fs/promises";
+import { rm, mkdir, cp } from "fs/promises";
 import { existsSync } from "fs";
 import path from "path";
-
-// Server deps to bundle (same as main build.ts)
-const serverAllowlist = [
-  "@anthropic-ai/sdk",
-  "@google/generative-ai",
-  "@modelcontextprotocol/sdk",
-  "axios",
-  "connect-pg-simple",
-  "cors",
-  "date-fns",
-  "dotenv",
-  "drizzle-orm",
-  "drizzle-zod",
-  "express",
-  "express-rate-limit",
-  "express-session",
-  "jsonwebtoken",
-  "memorystore",
-  "multer",
-  "nanoid",
-  "nodemailer",
-  "openai",
-  "passport",
-  "passport-local",
-  "pg",
-  "stripe",
-  "uuid",
-  "ws",
-  "xlsx",
-  "zod",
-  "zod-validation-error",
-];
 
 async function buildAll() {
   console.log("=== Cortex Electron Build ===\n");
@@ -56,16 +25,12 @@ async function buildAll() {
   console.log("1/3  Building client (Vite)...");
   await viteBuild();
 
-  // 2. Build server
-  console.log("2/3  Building server (esbuild)...");
-  const pkg = JSON.parse(await readFile("package.json", "utf-8"));
-  const allDeps = [
-    ...Object.keys(pkg.dependencies || {}),
-    ...Object.keys(pkg.devDependencies || {}),
-  ];
-  const externals = allDeps.filter((dep) => !serverAllowlist.includes(dep));
+  // 2. Build server — fully bundled, no externals
+  // The server bundle must be completely self-contained since the Electron
+  // app doesn't ship node_modules. Only Node.js built-in modules are external.
+  console.log("2/3  Building server (esbuild, fully bundled)...");
 
-  await esbuild({
+  const serverOpts: BuildOptions = {
     entryPoints: ["server/index.ts"],
     platform: "node",
     bundle: true,
@@ -75,9 +40,17 @@ async function buildAll() {
       "process.env.NODE_ENV": '"production"',
     },
     minify: true,
-    external: externals,
+    // No external deps — everything is bundled into a single file.
+    // This makes the server completely self-contained.
+    external: [],
     logLevel: "info",
-  });
+    // Suppress warnings for dynamic requires in deps (express, etc.)
+    logOverride: {
+      "commonjs-variable-in-esm": "silent",
+    },
+  };
+
+  await esbuild(serverOpts);
 
   // 3. Build Electron main + preload
   console.log("3/3  Building Electron main process...");
@@ -112,7 +85,7 @@ async function buildAll() {
 
   console.log("\n=== Build complete ===");
   console.log("  dist/public/        → Client assets");
-  console.log("  dist/index.cjs      → Express server bundle");
+  console.log("  dist/index.cjs      → Express server bundle (self-contained)");
   console.log("  dist/electron/      → Electron main.cjs + preload.cjs");
   console.log("\nRun `npx electron-builder` to package the desktop app.");
 }

@@ -59,9 +59,15 @@ async function startServer(port: number): Promise<void> {
   // Import the server — it self-starts via its IIFE
   return new Promise((resolve, reject) => {
     try {
+      console.log(`[Cortex] Loading server from: ${serverPath}`);
       require(serverPath);
-      // Give the server a moment to bind
+      console.log("[Cortex] Server module loaded, waiting for port...");
+
+      // Poll until the server is accepting connections
+      let attempts = 0;
+      const maxAttempts = 300; // 30 seconds at 100ms intervals
       const check = setInterval(() => {
+        attempts++;
         const testConn = net.createConnection({ port, host: "127.0.0.1" }, () => {
           testConn.end();
           clearInterval(check);
@@ -69,15 +75,14 @@ async function startServer(port: number): Promise<void> {
         });
         testConn.on("error", () => {
           // Not ready yet, keep checking
+          if (attempts >= maxAttempts) {
+            clearInterval(check);
+            reject(new Error("Server did not start within 30 seconds"));
+          }
         });
       }, 100);
-
-      // Timeout after 10s
-      setTimeout(() => {
-        clearInterval(check);
-        reject(new Error("Server did not start within 10 seconds"));
-      }, 10000);
     } catch (err) {
+      console.error("[Cortex] Failed to load server module:", err);
       reject(err);
     }
   });

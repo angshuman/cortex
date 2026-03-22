@@ -25,6 +25,7 @@ win:
     - target: nsis
       arch:
         - x64
+        - arm64
   icon: electron/icons/icon.png
 
 nsis:
@@ -51,9 +52,11 @@ linux:
     - target: AppImage
       arch:
         - x64
+        - arm64
     - target: deb
       arch:
         - x64
+        - arm64
   icon: electron/icons
   category: Utility
   maintainer: s42.ang@gmail.com

@@ -6,19 +6,24 @@
 
 A local-first personal operating system with an AI reasoner, note-taking, task management, and browser automation via MCP. Built with Node.js, TypeScript, React, and Tailwind CSS.
 
+---
+
 ## Download
 
-> **[Download the latest release](https://github.com/angshuman/cortex/releases/latest)**
+**[Go to the Releases page to download Cortex](https://github.com/angshuman/cortex/releases/latest)**
 
-| Platform | Download | Notes |
-|----------|----------|-------|
-| **Windows** | [Cortex-Setup-1.0.0.exe](https://github.com/angshuman/cortex/releases/latest/download/Cortex-Setup-1.0.0.exe) | NSIS installer (x64) |
-| **macOS (Apple Silicon)** | [Cortex-1.0.0-arm64.dmg](https://github.com/angshuman/cortex/releases/latest/download/Cortex-1.0.0-arm64.dmg) | M1/M2/M3/M4 |
-| **macOS (Intel)** | [Cortex-1.0.0.dmg](https://github.com/angshuman/cortex/releases/latest/download/Cortex-1.0.0.dmg) | Intel x64 |
-| **Linux (AppImage)** | [Cortex-1.0.0.AppImage](https://github.com/angshuman/cortex/releases/latest/download/Cortex-1.0.0.AppImage) | Runs on any distro |
-| **Linux (Debian)** | [cortex_1.0.0_amd64.deb](https://github.com/angshuman/cortex/releases/latest/download/cortex_1.0.0_amd64.deb) | Ubuntu / Debian |
+### Latest Release (v1.1.0)
 
-On first launch, a setup dialog will ask for an API key (OpenAI, Anthropic, xAI, or Google Gemini). No environment variables needed.
+- **Windows (x64):** [Cortex-Setup-1.1.0.exe](https://github.com/angshuman/cortex/releases/download/v1.1.0/Cortex-Setup-1.1.0.exe)
+- **Windows (ARM64):** [Cortex-Setup-1.1.0.exe](https://github.com/angshuman/cortex/releases/download/v1.1.0/Cortex-Setup-1.1.0.exe) (ARM64 NSIS installer)
+- **macOS (Apple Silicon):** [Cortex-1.1.0-arm64.dmg](https://github.com/angshuman/cortex/releases/download/v1.1.0/Cortex-1.1.0-arm64.dmg)
+- **macOS (Intel):** [Cortex-1.1.0.dmg](https://github.com/angshuman/cortex/releases/download/v1.1.0/Cortex-1.1.0.dmg)
+- **Linux (AppImage):** [Cortex-1.1.0.AppImage](https://github.com/angshuman/cortex/releases/download/v1.1.0/Cortex-1.1.0.AppImage)
+- **Linux (Debian/Ubuntu):** [cortex_1.1.0_amd64.deb](https://github.com/angshuman/cortex/releases/download/v1.1.0/cortex_1.1.0_amd64.deb)
+
+> On first launch, a setup dialog asks for an API key (OpenAI, Anthropic, xAI, or Google Gemini). No environment variables needed.
+
+---
 
 ## Features
 
@@ -143,6 +148,21 @@ Add custom skills via the Skills JSON in your vault's `skills/skills.json`.
 - Skills define tools the agent can invoke, with parameters and instructions
 - MCP browser support is built into the skill system
 - Electron wraps the Express server + React client into a native desktop app
+
+## Code Signing
+
+The binaries are currently unsigned. To enable code signing, add these GitHub repository secrets:
+
+**Windows:**
+- `WIN_CERT_P12_BASE64` — Base64-encoded .p12 certificate
+- `WIN_CERT_PASSWORD` — Certificate password
+
+**macOS:**
+- `MAC_CERT_P12_BASE64` — Base64-encoded Developer ID Application .p12
+- `MAC_CERT_PASSWORD` — Certificate password
+- `APPLE_ID` — Apple ID for notarization
+- `APPLE_APP_SPECIFIC_PASSWORD` — App-specific password
+- `APPLE_TEAM_ID` — Apple Developer Team ID
 
 ## License
 
