@@ -12,14 +12,17 @@ A local-first personal operating system with an AI reasoner, note-taking, task m
 
 **[Go to the Releases page to download Cortex](https://github.com/angshuman/cortex/releases/latest)**
 
-### Latest Release (v1.1.0)
+### Latest Release
 
-- **Windows (x64):** [Cortex-Setup-1.1.0.exe](https://github.com/angshuman/cortex/releases/download/v1.1.0/Cortex-Setup-1.1.0.exe)
-- **Windows (ARM64):** [Cortex-Setup-1.1.0.exe](https://github.com/angshuman/cortex/releases/download/v1.1.0/Cortex-Setup-1.1.0.exe) (ARM64 NSIS installer)
-- **macOS (Apple Silicon):** [Cortex-1.1.0-arm64.dmg](https://github.com/angshuman/cortex/releases/download/v1.1.0/Cortex-1.1.0-arm64.dmg)
-- **macOS (Intel):** [Cortex-1.1.0.dmg](https://github.com/angshuman/cortex/releases/download/v1.1.0/Cortex-1.1.0.dmg)
-- **Linux (AppImage):** [Cortex-1.1.0.AppImage](https://github.com/angshuman/cortex/releases/download/v1.1.0/Cortex-1.1.0.AppImage)
-- **Linux (Debian/Ubuntu):** [cortex_1.1.0_amd64.deb](https://github.com/angshuman/cortex/releases/download/v1.1.0/cortex_1.1.0_amd64.deb)
+| Platform | Architecture | Download |
+|----------|-------------|----------|
+| **Windows** | x64 / ARM64 | [Cortex-Setup.exe](https://github.com/angshuman/cortex/releases/latest/download/Cortex-Setup-1.1.1.exe) |
+| **macOS** | Apple Silicon | [Cortex-arm64.dmg](https://github.com/angshuman/cortex/releases/latest/download/Cortex-1.1.1-arm64.dmg) |
+| **macOS** | Intel | [Cortex.dmg](https://github.com/angshuman/cortex/releases/latest/download/Cortex-1.1.1.dmg) |
+| **Linux** | x64 | [Cortex.AppImage](https://github.com/angshuman/cortex/releases/latest/download/Cortex-1.1.1.AppImage) |
+| **Linux** | ARM64 | [Cortex-arm64.AppImage](https://github.com/angshuman/cortex/releases/latest/download/Cortex-1.1.1-arm64.AppImage) |
+| **Linux** | x64 (deb) | [cortex_amd64.deb](https://github.com/angshuman/cortex/releases/latest/download/cortex_1.1.1_amd64.deb) |
+| **Linux** | ARM64 (deb) | [cortex_arm64.deb](https://github.com/angshuman/cortex/releases/latest/download/cortex_1.1.1_arm64.deb) |
 
 > On first launch, a setup dialog asks for an API key (OpenAI, Anthropic, xAI, or Google Gemini). No environment variables needed.
 

@@ -45,14 +45,6 @@ jobs:
       - name: Build app (client + server + electron)
         run: npx tsx script/build-electron.ts
 
-      # macOS: import signing certificate if available
-      - name: Import macOS signing certificate
-        if: matrix.platform == 'mac' && env.CSC_LINK != ''
-        env:
-          CSC_LINK: ${{ secrets.MAC_CERT_P12_BASE64 }}
-          CSC_KEY_PASSWORD: ${{ secrets.MAC_CERT_PASSWORD }}
-        run: echo "Certificate imported via electron-builder env vars"
-
       # Linux: install rpmbuild for broader packaging support
       - name: Install Linux build deps
         if: matrix.platform == 'linux'
@@ -60,20 +52,28 @@ jobs:
           sudo apt-get update
           sudo apt-get install -y rpm
 
+      # Package with optional code signing.
+      # CSC_LINK / CSC_KEY_PASSWORD are only passed when the secrets are non-empty.
+      # electron-builder treats an empty CSC_LINK as a file path and fails.
       - name: Package Electron app
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          # Windows code signing (optional — set secrets to enable)
-          CSC_LINK: ${{ secrets.WIN_CERT_P12_BASE64 }}
-          CSC_KEY_PASSWORD: ${{ secrets.WIN_CERT_PASSWORD }}
-          # macOS code signing (optional — set secrets to enable)
-          CSC_LINK_MAC: ${{ secrets.MAC_CERT_P12_BASE64 }}
-          CSC_KEY_PASSWORD_MAC: ${{ secrets.MAC_CERT_PASSWORD }}
-          # macOS notarization (optional)
-          APPLE_ID: ${{ secrets.APPLE_ID }}
-          APPLE_APP_SPECIFIC_PASSWORD: ${{ secrets.APPLE_APP_SPECIFIC_PASSWORD }}
-          APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
-        run: npx electron-builder --config electron-builder.yml --${{ matrix.platform }} --publish always
+        run: |
+          # Windows code signing (optional)
+          if [ -n "${{ secrets.WIN_CERT_P12_BASE64 }}" ] && [ "${{ matrix.platform }}" = "win" ]; then
+            export CSC_LINK="${{ secrets.WIN_CERT_P12_BASE64 }}"
+            export CSC_KEY_PASSWORD="${{ secrets.WIN_CERT_PASSWORD }}"
+          fi
+          # macOS code signing (optional)
+          if [ -n "${{ secrets.MAC_CERT_P12_BASE64 }}" ] && [ "${{ matrix.platform }}" = "mac" ]; then
+            export CSC_LINK="${{ secrets.MAC_CERT_P12_BASE64 }}"
+            export CSC_KEY_PASSWORD="${{ secrets.MAC_CERT_PASSWORD }}"
+            export APPLE_ID="${{ secrets.APPLE_ID }}"
+            export APPLE_APP_SPECIFIC_PASSWORD="${{ secrets.APPLE_APP_SPECIFIC_PASSWORD }}"
+            export APPLE_TEAM_ID="${{ secrets.APPLE_TEAM_ID }}"
+          fi
+          npx electron-builder --config electron-builder.yml --${{ matrix.platform }} --publish always
+        shell: bash
 
       - name: Upload artifacts
         uses: actions/upload-artifact@v4
