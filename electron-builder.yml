@@ -30,9 +30,6 @@ win:
 nsis:
   oneClick: false
   allowToChangeInstallationDirectory: true
-  installerIcon: electron/icons/icon.ico
-  uninstallerIcon: electron/icons/icon.ico
-  installerHeaderIcon: electron/icons/icon.ico
 
 # ============ macOS ============
 mac:
@@ -41,7 +38,7 @@ mac:
       arch:
         - x64
         - arm64
-  icon: electron/icons/icon.icns
+  icon: electron/icons/icon.png
   category: public.app-category.productivity
   darkModeSupport: true
 
@@ -61,5 +58,9 @@ linux:
   category: Utility
   maintainer: s42.ang@gmail.com
 
-# Publish config (disabled — build locally)
-publish: null
+# Publish to GitHub Releases
+publish:
+  provider: github
+  owner: angshuman
+  repo: cortex
+  releaseType: release
