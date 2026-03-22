@@ -745,11 +745,67 @@ export class VaultManager {
   }
 
   // ============ CONFIG (global, not per-vault) ============
-  private detectProvider(): string {
+
+  /**
+   * Resolve an API key for a given provider.
+   * Priority: config.json apiKeys > environment variable.
+   */
+  resolveApiKey(provider: "openai" | "anthropic" | "grok" | "google"): string {
+    const config = this.getConfig();
+    const fromConfig = config.apiKeys?.[provider] || "";
+    if (fromConfig) return fromConfig;
+    // Fallback to env vars
+    const envMap: Record<string, string> = {
+      openai: process.env.OPENAI_API_KEY || "",
+      anthropic: process.env.ANTHROPIC_API_KEY || "",
+      grok: process.env.GROK_API_KEY || "",
+      google: process.env.GOOGLE_API_KEY || "",
+    };
+    return envMap[provider] || "";
+  }
+
+  /** Check which providers have a valid key (from config or env). */
+  getKeyStatus(): Record<string, { set: boolean; source: "config" | "env" | "none" }> {
+    const config = this.getConfig();
+    const providers = ["openai", "anthropic", "grok", "google"] as const;
+    const result: Record<string, { set: boolean; source: "config" | "env" | "none" }> = {};
+    for (const p of providers) {
+      const fromConfig = config.apiKeys?.[p] || "";
+      const envMap: Record<string, string> = {
+        openai: process.env.OPENAI_API_KEY || "",
+        anthropic: process.env.ANTHROPIC_API_KEY || "",
+        grok: process.env.GROK_API_KEY || "",
+        google: process.env.GOOGLE_API_KEY || "",
+      };
+      const fromEnv = envMap[p] || "";
+      if (fromConfig) result[p] = { set: true, source: "config" };
+      else if (fromEnv) result[p] = { set: true, source: "env" };
+      else result[p] = { set: false, source: "none" };
+    }
+    return result;
+  }
+
+  /** Detect provider from env vars only (used during initial config creation). */
+  private detectProviderFromEnv(): string {
     if (process.env.ANTHROPIC_API_KEY && process.env.ANTHROPIC_API_KEY.startsWith("sk-ant")) return "claude";
     if (process.env.OPENAI_API_KEY && process.env.OPENAI_API_KEY.startsWith("sk-")) return "openai";
     if (process.env.GROK_API_KEY) return "grok";
+    if (process.env.GOOGLE_API_KEY) return "google";
     return "claude";
+  }
+
+  /** Detect best provider from all sources (config keys + env vars). */
+  detectProvider(): string {
+    const configPath = path.join(this.rootDir, "config.json");
+    if (fs.existsSync(configPath)) {
+      const config = readJson(configPath, {} as any);
+      const keys = config.apiKeys || {};
+      if (keys.anthropic) return "claude";
+      if (keys.openai) return "openai";
+      if (keys.grok) return "grok";
+      if (keys.google) return "google";
+    }
+    return this.detectProviderFromEnv();
   }
 
   getConfig(): Config {
@@ -757,7 +813,8 @@ export class VaultManager {
     if (!fs.existsSync(configPath)) {
       const config = {
         dataDir: this.rootDir,
-        aiProvider: this.detectProvider(),
+        aiProvider: this.detectProviderFromEnv(),
+        apiKeys: { openai: "", anthropic: "", grok: "", google: "" },
         vectorSearch: "local" as const,
         browserBackend: "none" as const,
         mcpServers: {},

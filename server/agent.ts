@@ -32,14 +32,52 @@ interface ToolDef {
   parameters: Record<string, any>;
 }
 
-function detectProvider(): { provider: string; model: string } {
+/**
+ * Resolve the active AI provider and model.
+ * Priority: config.json apiKeys > env vars.
+ * Accepts optional VaultManager to read saved keys.
+ */
+function detectProvider(storage?: FileStorage): { provider: string; model: string } {
+  // Try config keys first via storage's parent VaultManager
+  // We access the VaultManager lazily to avoid circular deps
+  try {
+    const { vaultManager } = require("./storage");
+    if (vaultManager) {
+      const ak = vaultManager.resolveApiKey("anthropic");
+      const ok = vaultManager.resolveApiKey("openai");
+      const gk = vaultManager.resolveApiKey("grok");
+      const goog = vaultManager.resolveApiKey("google");
+      if (ak && ak.length > 10) return { provider: "claude", model: "claude-sonnet-4-20250514" };
+      if (ok && ok.length > 10) return { provider: "openai", model: "gpt-4o" };
+      if (gk && gk.length > 10) return { provider: "grok", model: "grok-3" };
+      if (goog && goog.length > 10) return { provider: "google", model: "gemini-2.0-flash" };
+    }
+  } catch {}
+  // Fallback to env vars only
   const ak = process.env.ANTHROPIC_API_KEY;
   const ok = process.env.OPENAI_API_KEY;
   const gk = process.env.GROK_API_KEY;
+  const goog = process.env.GOOGLE_API_KEY;
   if (ak && ak.length > 10) return { provider: "claude", model: "claude-sonnet-4-20250514" };
   if (ok && ok.length > 10) return { provider: "openai", model: "gpt-4o" };
   if (gk && gk.length > 10) return { provider: "grok", model: "grok-3" };
+  if (goog && goog.length > 10) return { provider: "google", model: "gemini-2.0-flash" };
   return { provider: "none", model: "none" };
+}
+
+/** Resolve an API key for a provider from config + env. */
+function resolveKey(provider: "openai" | "anthropic" | "grok" | "google"): string {
+  try {
+    const { vaultManager } = require("./storage");
+    if (vaultManager) return vaultManager.resolveApiKey(provider);
+  } catch {}
+  const envMap: Record<string, string> = {
+    openai: process.env.OPENAI_API_KEY || "",
+    anthropic: process.env.ANTHROPIC_API_KEY || "",
+    grok: process.env.GROK_API_KEY || "",
+    google: process.env.GOOGLE_API_KEY || "",
+  };
+  return envMap[provider] || "";
 }
 
 function getToolDefinitions(storage: FileStorage): ToolDef[] {
@@ -543,7 +581,7 @@ export class Agent {
 
     const { provider, model } = detectProvider();
     if (provider === "none") {
-      this.emit("error", "No AI provider configured. Set ANTHROPIC_API_KEY, OPENAI_API_KEY, or GROK_API_KEY.");
+      this.emit("error", "No AI provider configured. Add an API key in Settings > General, or set ANTHROPIC_API_KEY, OPENAI_API_KEY, GROK_API_KEY, or GOOGLE_API_KEY as an environment variable.");
       return;
     }
 
@@ -574,7 +612,8 @@ export class Agent {
   }
 
   private async runClaude(systemPrompt: string, tools: ToolDef[], model: string) {
-    const client = new Anthropic();
+    const apiKey = resolveKey("anthropic");
+    const client = new Anthropic(apiKey ? { apiKey } : undefined);
     const claudeTools: any[] = tools.map(t => ({
       name: t.name,
       description: t.description,
@@ -643,7 +682,13 @@ export class Agent {
     const config: any = {};
     if (provider === "grok") {
       config.baseURL = "https://api.x.ai/v1";
-      config.apiKey = process.env.GROK_API_KEY;
+      config.apiKey = resolveKey("grok");
+    } else if (provider === "google") {
+      config.baseURL = "https://generativelanguage.googleapis.com/v1beta/openai";
+      config.apiKey = resolveKey("google");
+    } else {
+      const key = resolveKey("openai");
+      if (key) config.apiKey = key;
     }
     const client = new OpenAI(config);
 

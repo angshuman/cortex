@@ -51,6 +51,7 @@ import {
   ExternalLink,
 } from "lucide-react";
 import { useToast } from "@/hooks/use-toast";
+import { ApiKeySetupDialog } from "@/components/api-key-dialog";
 
 interface Skill {
   name: string;
@@ -135,33 +136,33 @@ export default function SettingsPage() {
 
             {/* ====== GENERAL TAB ====== */}
             <TabsContent value="general" className="space-y-6">
-              {/* AI Provider */}
+              {/* API Keys */}
               <Card className="p-4">
-                <div className="flex items-center gap-2 mb-3">
+                <div className="flex items-center gap-2 mb-1">
                   <Brain className="w-4 h-4 text-primary" />
-                  <h3 className="text-sm font-medium">AI Provider</h3>
+                  <h3 className="text-sm font-medium">AI Provider Keys</h3>
+                  {info?.provider && info.provider !== "none" && (
+                    <Badge variant="secondary" className="text-[9px] px-1.5 py-0 h-3.5 ml-auto">
+                      Active: {info.provider}
+                    </Badge>
+                  )}
                 </div>
-                <div className="space-y-3">
-                  <div>
-                    <Label className="text-xs text-muted-foreground">Provider (auto-detected from env)</Label>
-                    <div className="flex items-center gap-2 mt-1">
-                      <Badge variant="secondary" className="text-xs">
-                        {info?.provider || "none"}
-                      </Badge>
-                      <span className="text-[10px] text-muted-foreground">
-                        Set ANTHROPIC_API_KEY, OPENAI_API_KEY, or GROK_API_KEY
-                      </span>
-                    </div>
-                  </div>
-                  <div>
-                    <Label className="text-xs text-muted-foreground">Model Override</Label>
-                    <Input
-                      className="mt-1 text-sm h-8"
-                      placeholder="Auto-detect"
-                      defaultValue={config?.aiModel || ""}
-                      onBlur={(e) => updateConfig.mutate({ aiModel: e.target.value || undefined })}
-                    />
-                  </div>
+                <p className="text-[10px] text-muted-foreground mb-3">
+                  Add API keys to connect AI providers. The first configured key
+                  determines the active provider.
+                </p>
+                <ApiKeySetupDialog open={false} onOpenChange={() => {}} mode="inline" />
+                <div className="mt-3">
+                  <Label className="text-xs text-muted-foreground">Model Override</Label>
+                  <Input
+                    className="mt-1 text-sm h-8"
+                    placeholder="Auto-detect"
+                    defaultValue={config?.aiModel || ""}
+                    onBlur={(e) => updateConfig.mutate({ aiModel: e.target.value || undefined })}
+                  />
+                  <p className="text-[10px] text-muted-foreground mt-1">
+                    Override the default model (e.g. gpt-4o, claude-sonnet-4-20250514, gemini-2.0-flash).
+                  </p>
                 </div>
               </Card>
 

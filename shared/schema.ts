@@ -148,10 +148,19 @@ export const agentSettingsSchema = z.object({
 });
 export type AgentSettings = z.infer<typeof agentSettingsSchema>;
 
+export const apiKeysSchema = z.object({
+  openai: z.string().default(""),
+  anthropic: z.string().default(""),
+  grok: z.string().default(""),
+  google: z.string().default(""),
+});
+export type ApiKeys = z.infer<typeof apiKeysSchema>;
+
 export const configSchema = z.object({
   dataDir: z.string().default("~/.cortex"),
-  aiProvider: z.enum(["claude", "openai", "grok"]).default("claude"),
+  aiProvider: z.enum(["claude", "openai", "grok", "google"]).default("claude"),
   aiModel: z.string().optional(),
+  apiKeys: apiKeysSchema.default({}),
   vectorSearch: z.enum(["local", "openai"]).default("local"),
   browserBackend: z.enum(["playwright-mcp", "none"]).default("none"),
   mcpServers: z.record(z.object({

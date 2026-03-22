@@ -1,3 +1,4 @@
+import { useState } from "react";
 import { Switch, Route } from "wouter";
 import { useHashLocation } from "wouter/use-hash-location";
 import { Router } from "wouter";
@@ -16,6 +17,7 @@ import FilesPage from "@/pages/files";
 import NotFound from "@/pages/not-found";
 import { ThemeProvider } from "@/components/theme-provider";
 import { VaultProvider } from "@/hooks/use-vault";
+import { ApiKeySetupDialog, useApiKeyCheck } from "@/components/api-key-dialog";
 
 function AppRouter() {
   return (
@@ -30,6 +32,21 @@ function AppRouter() {
       <Route path="/settings" component={SettingsPage} />
       <Route component={NotFound} />
     </Switch>
+  );
+}
+
+function ApiKeyStartupCheck() {
+  const { needsSetup } = useApiKeyCheck();
+  const [dismissed, setDismissed] = useState(false);
+
+  if (!needsSetup || dismissed) return null;
+
+  return (
+    <ApiKeySetupDialog
+      open={true}
+      onOpenChange={(open) => { if (!open) setDismissed(true); }}
+      mode="dialog"
+    />
   );
 }
 
@@ -54,6 +71,7 @@ export default function App() {
                 </div>
               </SidebarProvider>
             </Router>
+            <ApiKeyStartupCheck />
             <Toaster />
           </TooltipProvider>
         </VaultProvider>

@@ -427,11 +427,116 @@ export function registerRoutes(server: Server, app: Express) {
     res.json(store.search(query));
   });
 
+  // ============ API KEYS ============
+  /** Get key status (which providers have keys, masked values) */
+  app.get("/api/keys", (_req, res) => {
+    const status = vaultManager.getKeyStatus();
+    // Also return masked versions of set keys
+    const masked: Record<string, { set: boolean; source: string; masked: string }> = {};
+    for (const [provider, info] of Object.entries(status)) {
+      if (info.set) {
+        const key = vaultManager.resolveApiKey(provider as any);
+        masked[provider] = {
+          ...info,
+          masked: key.length > 8 ? key.slice(0, 4) + "..." + key.slice(-4) : "****",
+        };
+      } else {
+        masked[provider] = { ...info, masked: "" };
+      }
+    }
+    res.json(masked);
+  });
+
+  /** Save API keys */
+  app.patch("/api/keys", (req, res) => {
+    const config = vaultManager.getConfig();
+    const currentKeys = config.apiKeys || { openai: "", anthropic: "", grok: "", google: "" };
+    const updates = req.body as Record<string, string>;
+    const newKeys = { ...currentKeys };
+    for (const [k, v] of Object.entries(updates)) {
+      if (k in newKeys) {
+        (newKeys as any)[k] = v;
+      }
+    }
+    // Auto-detect provider from first key that's set
+    let aiProvider = config.aiProvider;
+    if (newKeys.anthropic) aiProvider = "claude";
+    else if (newKeys.openai) aiProvider = "openai";
+    else if (newKeys.grok) aiProvider = "grok";
+    else if (newKeys.google) aiProvider = "google";
+
+    vaultManager.saveConfig({ apiKeys: newKeys, aiProvider });
+    res.json({ ok: true, aiProvider });
+  });
+
+  /** Verify an API key by making a lightweight call */
+  app.post("/api/keys/verify", async (req, res) => {
+    const { provider, key } = req.body as { provider: string; key: string };
+    if (!provider || !key) return res.status(400).json({ valid: false, error: "Provider and key are required" });
+
+    try {
+      if (provider === "openai") {
+        // List models — cheap, fast
+        const resp = await fetch("https://api.openai.com/v1/models", {
+          headers: { Authorization: `Bearer ${key}` },
+        });
+        if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
+        res.json({ valid: true });
+      } else if (provider === "anthropic") {
+        // Send a tiny completion request
+        const resp = await fetch("https://api.anthropic.com/v1/messages", {
+          method: "POST",
+          headers: {
+            "x-api-key": key,
+            "anthropic-version": "2023-06-01",
+            "Content-Type": "application/json",
+          },
+          body: JSON.stringify({
+            model: "claude-sonnet-4-20250514",
+            max_tokens: 1,
+            messages: [{ role: "user", content: "hi" }],
+          }),
+        });
+        if (!resp.ok) {
+          const body = await resp.text();
+          // 400 with "credit balance is too low" still means key is valid
+          if (resp.status === 400 && body.includes("credit")) {
+            res.json({ valid: true, warning: "Key is valid but account may have low credits" });
+            return;
+          }
+          throw new Error(`HTTP ${resp.status}`);
+        }
+        res.json({ valid: true });
+      } else if (provider === "grok") {
+        // xAI uses OpenAI-compatible API
+        const resp = await fetch("https://api.x.ai/v1/models", {
+          headers: { Authorization: `Bearer ${key}` },
+        });
+        if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
+        res.json({ valid: true });
+      } else if (provider === "google") {
+        // Google AI Studio / Gemini
+        const resp = await fetch(`https://generativelanguage.googleapis.com/v1beta/models?key=${key}`);
+        if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
+        res.json({ valid: true });
+      } else {
+        res.status(400).json({ valid: false, error: "Unknown provider" });
+      }
+    } catch (err: any) {
+      res.json({ valid: false, error: err.message || "Verification failed" });
+    }
+  });
+
   // ============ INFO ============
   app.get("/api/info", (_req, res) => {
+    const provider = vaultManager.detectProvider();
+    const keyStatus = vaultManager.getKeyStatus();
+    const hasAnyKey = Object.values(keyStatus).some(k => k.set);
     res.json({
       dataDir: vaultManager.getRootDir(),
-      provider: process.env.ANTHROPIC_API_KEY ? "claude" : process.env.OPENAI_API_KEY ? "openai" : process.env.GROK_API_KEY ? "grok" : "none",
+      provider: hasAnyKey ? provider : "none",
+      hasApiKey: hasAnyKey,
+      keyStatus,
       version: "2.0.0",
     });
   });
