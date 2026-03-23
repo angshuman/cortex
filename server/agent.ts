@@ -182,6 +182,11 @@ async function executeTool(name: string, args: Record<string, any>, storage: Fil
           folder: args.folder,
           tags: args.tags,
         });
+        // Migrate any chat asset images into the note's own assets folder
+        const migratedContent = storage.migrateContentImages(note.id, note.content);
+        if (migratedContent !== note.content) {
+          storage.updateNote(note.id, { content: migratedContent, attachments: ["migrated"] });
+        }
         return JSON.stringify({ success: true, note: { id: note.id, title: note.title } });
       }
       case "read_note": {
@@ -197,7 +202,10 @@ async function executeTool(name: string, args: Record<string, any>, storage: Fil
       case "update_note": {
         const updates: any = {};
         if (args.title) updates.title = args.title;
-        if (args.content) updates.content = args.content;
+        if (args.content) {
+          // Migrate any chat asset images into the note's own assets folder
+          updates.content = storage.migrateContentImages(args.id, args.content);
+        }
         const note = storage.updateNote(args.id, updates);
         if (!note) return JSON.stringify({ error: "Note not found" });
         return JSON.stringify({ success: true, note: { id: note.id, title: note.title } });

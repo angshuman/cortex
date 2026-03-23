@@ -163,6 +163,56 @@ export class FileStorage {
     return path.join(this.dataDir, "chat", "assets", filename);
   }
 
+  /**
+   * Copy an image from a chat asset (or other note asset) URL into this note's
+   * dedicated assets folder.  Returns the new note-asset URL, or null if the
+   * source buffer could not be found.
+   */
+  migrateImageToNote(noteId: string, sourceUrl: string): string | null {
+    let buffer: Buffer | null = null;
+    let originalFilename = "image.png";
+
+    // /api/chat/assets/<filename>
+    const chatMatch = sourceUrl.match(/\/api\/chat\/assets\/(.+)$/);
+    if (chatMatch) {
+      originalFilename = chatMatch[1];
+      buffer = this.getChatAsset(originalFilename);
+    }
+
+    // /api/notes/<noteId>/assets/<filename>
+    if (!buffer) {
+      const noteMatch = sourceUrl.match(/\/api\/notes\/([^/]+)\/assets\/(.+)$/);
+      if (noteMatch) {
+        originalFilename = noteMatch[2];
+        buffer = this.getNoteAsset(noteMatch[1], originalFilename);
+      }
+    }
+
+    if (!buffer) return null;
+
+    // Save to this note's assets folder
+    const newFilename = `${Date.now()}-${originalFilename}`;
+    return this.saveNoteAsset(noteId, newFilename, buffer);
+  }
+
+  /**
+   * Scan markdown content for image references pointing to chat assets
+   * (or other non-local paths) and migrate them into the note's own
+   * assets folder.  Returns the rewritten content.
+   */
+  migrateContentImages(noteId: string, content: string): string {
+    // Match markdown images: ![alt](/api/chat/assets/...) or ![alt](/api/notes/OTHER_ID/assets/...)
+    return content.replace(
+      /(!\[[^\]]*\])\((\/api\/(?:chat\/assets|notes\/[^/]+\/assets)\/[^)]+)\)/g,
+      (_match, altPart, url) => {
+        // Don't migrate if already pointing to this note's assets
+        if (url.startsWith(`/api/notes/${noteId}/assets/`)) return _match;
+        const newUrl = this.migrateImageToNote(noteId, url);
+        return newUrl ? `${altPart}(${newUrl})` : _match;
+      }
+    );
+  }
+
   // ============ FILES (user-uploaded file storage) ============
   private filesDir() { return path.join(this.dataDir, "files"); }
   private filesMetaPath() { return path.join(this.filesDir(), "_meta.json"); }

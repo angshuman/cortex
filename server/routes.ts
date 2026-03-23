@@ -125,15 +125,26 @@ export function registerRoutes(server: Server, app: Express) {
   });
 
   app.get("/api/notes/:id/assets/:filename", (req, res) => {
-    const store = getVaultStorage(req);
-    const buffer = store.getNoteAsset(req.params.id as string, req.params.filename as string);
+    // Try the requested vault first, then fall back to searching all vaults
+    const noteId = req.params.id as string;
+    const filename = req.params.filename as string;
+    let buffer = getVaultStorage(req).getNoteAsset(noteId, filename);
+    if (!buffer) {
+      // Search all vaults for this asset
+      for (const vault of vaultManager.getVaults()) {
+        const store = vaultManager.getStorage(vault.id);
+        buffer = store.getNoteAsset(noteId, filename);
+        if (buffer) break;
+      }
+    }
     if (!buffer) return res.status(404).end();
-    const ext = path.extname(req.params.filename as string).toLowerCase();
+    const ext = path.extname(filename).toLowerCase();
     const mimeMap: Record<string, string> = {
       ".png": "image/png", ".jpg": "image/jpeg", ".jpeg": "image/jpeg",
       ".gif": "image/gif", ".webp": "image/webp", ".svg": "image/svg+xml",
     };
     res.setHeader("Content-Type", mimeMap[ext] || "application/octet-stream");
+    res.setHeader("Cache-Control", "public, max-age=31536000, immutable");
     res.send(buffer);
   });
 
@@ -227,16 +238,25 @@ export function registerRoutes(server: Server, app: Express) {
   });
 
   app.get("/api/chat/assets/:filename", (req, res) => {
-    const store = getVaultStorage(req);
-    const buffer = store.getChatAsset(req.params.filename as string);
+    const filename = req.params.filename as string;
+    // Try the requested vault first, then fall back to searching all vaults
+    let buffer = getVaultStorage(req).getChatAsset(filename);
+    if (!buffer) {
+      for (const vault of vaultManager.getVaults()) {
+        const store = vaultManager.getStorage(vault.id);
+        buffer = store.getChatAsset(filename);
+        if (buffer) break;
+      }
+    }
     if (!buffer) return res.status(404).end();
-    const ext = path.extname(req.params.filename as string).toLowerCase();
+    const ext = path.extname(filename).toLowerCase();
     const mimeMap: Record<string, string> = {
       ".png": "image/png", ".jpg": "image/jpeg", ".jpeg": "image/jpeg",
       ".gif": "image/gif", ".webp": "image/webp", ".svg": "image/svg+xml",
       ".bmp": "image/bmp",
     };
     res.setHeader("Content-Type", mimeMap[ext] || "application/octet-stream");
+    res.setHeader("Cache-Control", "public, max-age=31536000, immutable");
     res.send(buffer);
   });
 
