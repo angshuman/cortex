@@ -8,6 +8,13 @@ import type { ChatEvent, Skill, VaultSettings, AgentSettings } from "@shared/sch
 
 type EventCallback = (event: ChatEvent) => void;
 
+export interface ContextItem {
+  type: "note" | "task" | "text";
+  title: string;
+  content: string;
+  id?: string;
+}
+
 interface ImageBlock {
   type: "image";
   url: string;         // local URL like /api/chat/assets/xxx.png
@@ -80,6 +87,33 @@ function resolveKey(provider: "openai" | "anthropic" | "grok" | "google"): strin
   return envMap[provider] || "";
 }
 
+/**
+ * Select skills relevant to the current user message + context.
+ * Priority 0 skills and skills without triggerKeywords are always included.
+ * Others are matched by keyword against the user's message and context.
+ */
+function selectRelevantSkills(allSkills: Skill[], userMessage: string, contextItems: ContextItem[] = []): Skill[] {
+  const messageLower = userMessage.toLowerCase();
+  const contextText = contextItems.map(c => c.title + " " + c.content).join(" ").toLowerCase();
+  const combined = messageLower + " " + contextText;
+
+  const selected: Skill[] = [];
+  for (const skill of allSkills) {
+    if (!skill.enabled) continue;
+    // Priority 0 = always include
+    if ((skill.priority ?? 1) === 0) { selected.push(skill); continue; }
+    // No trigger keywords = always include (backward compat)
+    if (!skill.triggerKeywords || skill.triggerKeywords.length === 0) { selected.push(skill); continue; }
+    // Match any trigger keyword
+    if (skill.triggerKeywords.some(kw => combined.includes(kw.toLowerCase()))) {
+      selected.push(skill);
+    }
+  }
+  // Sort by priority (lower = more important = appears first in prompt)
+  selected.sort((a, b) => (a.priority ?? 1) - (b.priority ?? 1));
+  return selected;
+}
+
 function getToolDefinitions(storage: FileStorage): ToolDef[] {
   const skills = storage.getSkills().filter((s: Skill) => s.enabled);
   const tools: ToolDef[] = [];
@@ -88,7 +122,9 @@ function getToolDefinitions(storage: FileStorage): ToolDef[] {
   const skillToolNames = new Set<string>();
   
   for (const skill of skills) {
-    // Skip the stub browser-use skill if MCP playwright is connected
+    // instructionsOnly skills provide guidance only — no tool registration
+    if (skill.instructionsOnly) continue;
+    // Skip browser-use stub tools if MCP playwright is connected (MCP provides them)
     if (skill.name === "browser-use" && mcpManager.isConnected("playwright")) continue;
     
     for (const tool of skill.tools) {
@@ -266,7 +302,17 @@ async function executeTool(name: string, args: Record<string, any>, storage: Fil
           return JSON.stringify({ error: `Browser tool "${name}" not available. Enable the Playwright browser backend in Settings > General, then ensure the MCP server is running (npx @playwright/mcp).` });
         }
         try {
-          const result = await mcpManager.callTool(server, name, args);
+          let result = await mcpManager.callTool(server, name, args);
+          // Post-tool-call hints: help the LLM handle common browser states
+          if (name !== "browser_handle_dialog") {
+            const lower = result.toLowerCase();
+            if (lower.includes("dialog") || lower.includes("[modal]") || lower.includes("alert box")) {
+              result += "\n\n[HINT: A dialog or popup appears to be present on the page. Use browser_handle_dialog to accept or dismiss it before continuing with other interactions.]";
+            }
+            if (lower.includes("cookie") || lower.includes("consent") || lower.includes("gdpr")) {
+              result += "\n\n[HINT: A cookie consent banner is detected. Look for an 'Accept' or 'Allow all' button in the accessibility tree and click it to proceed.]";
+            }
+          }
           return result;
         } catch (err: any) {
           return JSON.stringify({ error: `Browser tool error: ${err.message}` });
@@ -377,9 +423,10 @@ function messagesToOpenAI(messages: AgentMessage[], systemPrompt: string, storag
   return result;
 }
 
-function buildSystemPrompt(storage: FileStorage, vaultSettings?: VaultSettings, agentSettings?: AgentSettings): string {
-  const skills = storage.getSkills().filter((s: Skill) => s.enabled);
-  const skillInstructions = skills.map((s: Skill) => s.instructions).filter(Boolean).join("\n\n");
+function buildSystemPrompt(storage: FileStorage, vaultSettings?: VaultSettings, agentSettings?: AgentSettings, userMessage?: string, contextItems?: ContextItem[]): string {
+  const allSkills = storage.getSkills();
+  const relevant = selectRelevantSkills(allSkills, userMessage || "", contextItems || []);
+  const skillInstructions = relevant.map((s: Skill) => s.instructions).filter(Boolean).join("\n\n");
   const notes = storage.getNotes();
   const tasks = storage.getTasks().filter((t: any) => t.status !== "archived");
   const taskSummary = tasks.length > 0
@@ -453,12 +500,7 @@ Always use markdown formatting in responses.
 ${skillInstructions}${agentSettings?.systemPromptSuffix ? `\n\n## Custom Instructions\n${agentSettings.systemPromptSuffix}` : ""}`;
 }
 
-export interface ContextItem {
-  type: "note" | "task" | "text";
-  title: string;
-  content: string;
-  id?: string;
-}
+// ContextItem is defined above selectRelevantSkills
 
 const defaultAgentSettings: AgentSettings = {
   maxTurns: 10,
@@ -585,7 +627,7 @@ export class Agent {
       return;
     }
 
-    let systemPrompt = buildSystemPrompt(this.storage, this.vaultSettings, this.agentSettings);
+    let systemPrompt = buildSystemPrompt(this.storage, this.vaultSettings, this.agentSettings, effectiveMessage, this.context);
 
     // Inject context items into system prompt
     if (this.context.length > 0) {

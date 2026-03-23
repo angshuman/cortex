@@ -120,6 +120,8 @@ export const skillToolSchema = z.object({
   parameters: z.array(skillToolParamSchema).default([]),
 });
 
+export const skillCategoryEnum = z.enum(["core", "productivity", "browser", "research", "writing", "custom"]);
+
 export const skillSchema = z.object({
   name: z.string(),
   description: z.string(),
@@ -128,8 +130,19 @@ export const skillSchema = z.object({
   tools: z.array(skillToolSchema).default([]),
   enabled: z.boolean().default(true),
   builtin: z.boolean().default(false),
+  /** Keywords that trigger this skill's inclusion in the system prompt. Empty = always include when enabled. */
+  triggerKeywords: z.array(z.string()).default([]),
+  /** UI grouping category */
+  category: skillCategoryEnum.default("custom"),
+  /** If true, only instructions are injected — tools come from MCP or executeTool. */
+  instructionsOnly: z.boolean().default(false),
+  /** Context window priority: 0=always, 1=high, 2=medium, 3=low */
+  priority: z.number().min(0).max(3).default(1),
+  /** File path if loaded from skills directory. Null for hardcoded builtins. */
+  filePath: z.string().nullable().default(null),
 });
 export type Skill = z.infer<typeof skillSchema>;
+export type SkillCategory = z.infer<typeof skillCategoryEnum>;
 
 // ============ CONFIG ============
 export const agentSettingsSchema = z.object({
@@ -162,7 +175,7 @@ export const configSchema = z.object({
   aiModel: z.string().optional(),
   apiKeys: apiKeysSchema.default({}),
   vectorSearch: z.enum(["local", "openai"]).default("local"),
-  browserBackend: z.enum(["playwright-mcp", "none"]).default("none"),
+  browserBackend: z.enum(["playwright-mcp", "none"]).default("playwright-mcp"),
   mcpServers: z.record(z.object({
     command: z.string(),
     args: z.array(z.string()).default([]),

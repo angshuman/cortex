@@ -57,10 +57,36 @@ interface Skill {
   name: string;
   description: string;
   version: string;
+  instructions: string;
   tools: any[];
   enabled: boolean;
   builtin: boolean;
+  triggerKeywords: string[];
+  category: string;
+  instructionsOnly: boolean;
+  priority: number;
+  filePath: string | null;
 }
+
+const CATEGORY_ORDER = ["core", "browser", "research", "writing", "productivity", "custom"];
+const CATEGORY_LABELS: Record<string, string> = {
+  core: "Core",
+  browser: "Browser",
+  research: "Research",
+  writing: "Writing",
+  productivity: "Productivity",
+  custom: "Custom",
+};
+const CATEGORY_DESCRIPTIONS: Record<string, string> = {
+  core: "Essential tools — always available",
+  browser: "Web browsing and automation",
+  research: "Search and deep research",
+  writing: "Drafting and summarization",
+  productivity: "Planning, code, and meetings",
+  custom: "User-created skills",
+};
+const PRIORITY_LABELS = ["Always", "High", "Medium", "Low"];
+const PRIORITY_COLORS = ["bg-green-500", "bg-blue-500", "bg-yellow-500", "bg-gray-400"];
 
 export default function SettingsPage() {
   const { toast } = useToast();
@@ -97,6 +123,25 @@ export default function SettingsPage() {
       queryClient.invalidateQueries({ queryKey: ["/api/skills"] });
     },
   });
+
+  const saveSkill = useMutation({
+    mutationFn: (skill: Skill) => apiRequest("POST", withVault("/api/skills", vaultParam), skill),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["/api/skills"] });
+      toast({ title: "Skill saved" });
+    },
+  });
+
+  const deleteSkillMutation = useMutation({
+    mutationFn: (name: string) => apiRequest("DELETE", withVault(`/api/skills/${encodeURIComponent(name)}`, vaultParam)),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["/api/skills"] });
+      toast({ title: "Skill deleted" });
+    },
+  });
+
+  const [editingSkill, setEditingSkill] = useState<Skill | null>(null);
+  const [creatingSkill, setCreatingSkill] = useState(false);
 
   return (
     <div className="flex-1 flex flex-col h-full">
@@ -216,40 +261,124 @@ export default function SettingsPage() {
             </TabsContent>
 
             {/* ====== SKILLS TAB ====== */}
-            <TabsContent value="skills" className="space-y-3">
-              <p className="text-xs text-muted-foreground mb-4">
-                Skills extend what the AI agent can do. Built-in skills are always available. You can add custom skills later.
-                {activeVault && <span className="ml-1 font-medium">Showing skills for {activeVault.icon} {activeVault.name}.</span>}
-              </p>
-              {skills.map(skill => (
-                <Card key={skill.name} className="p-3">
-                  <div className="flex items-center gap-3">
-                    <div className="flex-1 min-w-0">
-                      <div className="flex items-center gap-2">
-                        <Wrench className="w-3.5 h-3.5 text-muted-foreground" />
-                        <span className="text-sm font-medium">{skill.name}</span>
-                        {skill.builtin && (
-                          <Badge variant="secondary" className="text-[9px] px-1.5 py-0 h-3.5">Built-in</Badge>
-                        )}
-                        <Badge variant="outline" className="text-[9px] px-1.5 py-0 h-3.5">v{skill.version}</Badge>
-                      </div>
-                      <p className="text-[11px] text-muted-foreground mt-0.5">{skill.description}</p>
-                      <div className="flex flex-wrap gap-1 mt-1.5">
-                        {skill.tools.map(t => (
-                          <Badge key={t.name} variant="secondary" className="text-[9px] font-mono px-1.5 py-0 h-3.5">
-                            {t.name}
-                          </Badge>
-                        ))}
-                      </div>
+            <TabsContent value="skills" className="space-y-4">
+              {editingSkill || creatingSkill ? (
+                <SkillEditor
+                  skill={editingSkill}
+                  onSave={(skill) => {
+                    saveSkill.mutate(skill);
+                    setEditingSkill(null);
+                    setCreatingSkill(false);
+                  }}
+                  onCancel={() => { setEditingSkill(null); setCreatingSkill(false); }}
+                />
+              ) : (
+                <>
+                  <div className="flex items-center justify-between">
+                    <div>
+                      <p className="text-xs text-muted-foreground">
+                        Skills teach the AI agent how to behave. Drop .json files into your vault's skills/ directory to add custom skills.
+                        {activeVault && <span className="ml-1 font-medium">Vault: {activeVault.icon} {activeVault.name}</span>}
+                      </p>
                     </div>
-                    <Switch
-                      checked={skill.enabled}
-                      onCheckedChange={() => toggleSkill.mutate(skill)}
-                      data-testid={`switch-skill-${skill.name}`}
-                    />
+                    <Button
+                      size="sm"
+                      variant="outline"
+                      className="h-7 text-xs shrink-0"
+                      onClick={() => setCreatingSkill(true)}
+                    >
+                      <Plus className="w-3 h-3 mr-1.5" />
+                      New Skill
+                    </Button>
                   </div>
-                </Card>
-              ))}
+
+                  {CATEGORY_ORDER.map(cat => {
+                    const catSkills = skills.filter(s => (s.category || "custom") === cat);
+                    if (catSkills.length === 0) return null;
+                    return (
+                      <div key={cat}>
+                        <div className="flex items-center gap-2 mb-2">
+                          <h3 className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">
+                            {CATEGORY_LABELS[cat] || cat}
+                          </h3>
+                          <span className="text-[10px] text-muted-foreground">{CATEGORY_DESCRIPTIONS[cat]}</span>
+                        </div>
+                        <div className="space-y-2">
+                          {catSkills.map(skill => (
+                            <Card key={skill.name} className="p-3">
+                              <div className="flex items-center gap-3">
+                                <div className="flex-1 min-w-0">
+                                  <div className="flex items-center gap-2">
+                                    <div className={`w-2 h-2 rounded-full ${PRIORITY_COLORS[skill.priority ?? 1]} shrink-0`} title={`Priority: ${PRIORITY_LABELS[skill.priority ?? 1]}`} />
+                                    <Wrench className="w-3.5 h-3.5 text-muted-foreground" />
+                                    <span className="text-sm font-medium">{skill.name}</span>
+                                    {skill.builtin && (
+                                      <Badge variant="secondary" className="text-[9px] px-1.5 py-0 h-3.5">Built-in</Badge>
+                                    )}
+                                    {skill.instructionsOnly && (
+                                      <Badge variant="outline" className="text-[9px] px-1.5 py-0 h-3.5">Guide</Badge>
+                                    )}
+                                    <Badge variant="outline" className="text-[9px] px-1.5 py-0 h-3.5">v{skill.version}</Badge>
+                                  </div>
+                                  <p className="text-[11px] text-muted-foreground mt-0.5">{skill.description}</p>
+                                  <div className="flex flex-wrap gap-1 mt-1.5">
+                                    {skill.tools?.map((t: any) => (
+                                      <Badge key={t.name} variant="secondary" className="text-[9px] font-mono px-1.5 py-0 h-3.5">
+                                        {t.name}
+                                      </Badge>
+                                    ))}
+                                    {(skill.triggerKeywords || []).slice(0, 5).map((kw: string) => (
+                                      <Badge key={kw} variant="outline" className="text-[9px] px-1.5 py-0 h-3.5 text-blue-400 border-blue-400/30">
+                                        {kw}
+                                      </Badge>
+                                    ))}
+                                    {(skill.triggerKeywords || []).length > 5 && (
+                                      <Badge variant="outline" className="text-[9px] px-1.5 py-0 h-3.5 text-blue-400 border-blue-400/30">
+                                        +{skill.triggerKeywords.length - 5} more
+                                      </Badge>
+                                    )}
+                                  </div>
+                                </div>
+                                <div className="flex items-center gap-1">
+                                  <Button
+                                    size="sm"
+                                    variant="ghost"
+                                    className="h-6 w-6 p-0"
+                                    onClick={() => setEditingSkill(skill)}
+                                    title="Edit skill"
+                                  >
+                                    <SlidersHorizontal className="w-3 h-3" />
+                                  </Button>
+                                  {!skill.builtin && (
+                                    <Button
+                                      size="sm"
+                                      variant="ghost"
+                                      className="h-6 w-6 p-0 text-muted-foreground hover:text-destructive"
+                                      onClick={() => {
+                                        if (confirm(`Delete skill "${skill.name}"?`)) {
+                                          deleteSkillMutation.mutate(skill.name);
+                                        }
+                                      }}
+                                      title="Delete skill"
+                                    >
+                                      <Trash2 className="w-3 h-3" />
+                                    </Button>
+                                  )}
+                                  <Switch
+                                    checked={skill.enabled}
+                                    onCheckedChange={() => toggleSkill.mutate(skill)}
+                                    data-testid={`switch-skill-${skill.name}`}
+                                  />
+                                </div>
+                              </div>
+                            </Card>
+                          ))}
+                        </div>
+                      </div>
+                    );
+                  })}
+                </>
+              )}
             </TabsContent>
 
             {/* ====== ABOUT TAB ====== */}
@@ -624,6 +753,179 @@ function AgentSettingsCard({
             Appended as "Custom Instructions" to every system prompt. Use for persona, style, or domain-specific rules.
           </p>
         </div>
+      </div>
+    </Card>
+  );
+}
+
+/** Skill create/edit form */
+function SkillEditor({
+  skill,
+  onSave,
+  onCancel,
+}: {
+  skill: Skill | null; // null = create new
+  onSave: (skill: Skill) => void;
+  onCancel: () => void;
+}) {
+  const isNew = !skill;
+  const [name, setName] = useState(skill?.name || "");
+  const [description, setDescription] = useState(skill?.description || "");
+  const [category, setCategory] = useState(skill?.category || "custom");
+  const [priority, setPriority] = useState(String(skill?.priority ?? 1));
+  const [keywords, setKeywords] = useState(skill?.triggerKeywords?.join(", ") || "");
+  const [instructions, setInstructions] = useState(skill?.instructions || "");
+  const [instructionsOnly, setInstructionsOnly] = useState(skill?.instructionsOnly ?? false);
+
+  const handleSave = () => {
+    if (!name.trim()) return;
+    onSave({
+      name: name.trim(),
+      description: description.trim(),
+      version: skill?.version || "1.0",
+      instructions: instructions.trim(),
+      tools: skill?.tools || [],
+      enabled: skill?.enabled ?? true,
+      builtin: skill?.builtin ?? false,
+      triggerKeywords: keywords
+        .split(",")
+        .map((k) => k.trim())
+        .filter(Boolean),
+      category,
+      instructionsOnly,
+      priority: parseInt(priority, 10),
+      filePath: skill?.filePath || null,
+    });
+  };
+
+  return (
+    <Card className="p-4 space-y-4">
+      <div className="flex items-center justify-between">
+        <h3 className="text-sm font-medium">{isNew ? "New Skill" : `Edit: ${skill.name}`}</h3>
+        <Button size="sm" variant="ghost" className="h-7 text-xs" onClick={onCancel}>
+          Cancel
+        </Button>
+      </div>
+
+      {/* Name */}
+      <div>
+        <Label className="text-xs text-muted-foreground mb-1 block">Name</Label>
+        <Input
+          className="text-sm h-8"
+          placeholder="my-skill"
+          value={name}
+          onChange={(e) => setName(e.target.value)}
+          disabled={!isNew && skill.builtin}
+          data-testid="input-skill-name"
+        />
+      </div>
+
+      {/* Description */}
+      <div>
+        <Label className="text-xs text-muted-foreground mb-1 block">Description</Label>
+        <Input
+          className="text-sm h-8"
+          placeholder="What this skill does"
+          value={description}
+          onChange={(e) => setDescription(e.target.value)}
+          data-testid="input-skill-description"
+        />
+      </div>
+
+      {/* Category + Priority row */}
+      <div className="grid grid-cols-2 gap-3">
+        <div>
+          <Label className="text-xs text-muted-foreground mb-1 block">Category</Label>
+          <Select value={category} onValueChange={setCategory}>
+            <SelectTrigger className="text-sm h-8">
+              <SelectValue />
+            </SelectTrigger>
+            <SelectContent>
+              {CATEGORY_ORDER.map((cat) => (
+                <SelectItem key={cat} value={cat}>
+                  {CATEGORY_LABELS[cat]}
+                </SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
+        </div>
+        <div>
+          <Label className="text-xs text-muted-foreground mb-1 block">Priority</Label>
+          <Select value={priority} onValueChange={setPriority}>
+            <SelectTrigger className="text-sm h-8">
+              <SelectValue />
+            </SelectTrigger>
+            <SelectContent>
+              {PRIORITY_LABELS.map((label, i) => (
+                <SelectItem key={i} value={String(i)}>
+                  <div className="flex items-center gap-2">
+                    <div className={`w-2 h-2 rounded-full ${PRIORITY_COLORS[i]}`} />
+                    {label}
+                  </div>
+                </SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
+        </div>
+      </div>
+
+      {/* Trigger Keywords */}
+      <div>
+        <Label className="text-xs text-muted-foreground mb-1 block">Trigger Keywords</Label>
+        <Input
+          className="text-sm h-8"
+          placeholder="browse, navigate, click, website (comma-separated)"
+          value={keywords}
+          onChange={(e) => setKeywords(e.target.value)}
+          data-testid="input-skill-keywords"
+        />
+        <p className="text-[10px] text-muted-foreground mt-1">
+          Comma-separated words that activate this skill when detected in user messages.
+        </p>
+      </div>
+
+      {/* Instructions Only toggle */}
+      <div className="flex items-center justify-between">
+        <div>
+          <Label className="text-xs">Instructions Only (no tools)</Label>
+          <p className="text-[10px] text-muted-foreground">
+            Injects guidance into the system prompt without registering tools.
+          </p>
+        </div>
+        <Switch
+          checked={instructionsOnly}
+          onCheckedChange={setInstructionsOnly}
+          data-testid="switch-instructions-only"
+        />
+      </div>
+
+      {/* Instructions textarea */}
+      <div>
+        <Label className="text-xs text-muted-foreground mb-1 block">Instructions</Label>
+        <textarea
+          className="w-full text-xs font-mono bg-background border border-input rounded-md px-3 py-2 min-h-[200px] resize-y focus:outline-none focus:ring-1 focus:ring-ring"
+          placeholder="Detailed instructions for the AI agent when this skill is active..."
+          value={instructions}
+          onChange={(e) => setInstructions(e.target.value)}
+          data-testid="textarea-skill-instructions"
+        />
+      </div>
+
+      {/* Save / Cancel buttons */}
+      <div className="flex items-center gap-2 pt-2">
+        <Button
+          size="sm"
+          className="h-8 text-xs px-4"
+          onClick={handleSave}
+          disabled={!name.trim()}
+          data-testid="button-save-skill"
+        >
+          <Check className="w-3 h-3 mr-1.5" />
+          {isNew ? "Create Skill" : "Save Changes"}
+        </Button>
+        <Button size="sm" variant="outline" className="h-8 text-xs px-4" onClick={onCancel}>
+          Cancel
+        </Button>
       </div>
     </Card>
   );

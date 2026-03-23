@@ -308,10 +308,28 @@ export function registerRoutes(server: Server, app: Express) {
     res.json({ success: true });
   });
 
+  app.put("/api/skills/:name", (req, res) => {
+    const store = getVaultStorage(req);
+    const skill = { ...req.body, name: req.params.name };
+    store.saveSkill(skill);
+    res.json({ success: true });
+  });
+
   app.delete("/api/skills/:name", (req, res) => {
     const store = getVaultStorage(req);
     store.deleteSkill(req.params.name as string);
     res.json({ success: true });
+  });
+
+  app.get("/api/skills/categories", (_req, res) => {
+    res.json([
+      { id: "core", label: "Core", description: "Essential tools — always available" },
+      { id: "browser", label: "Browser", description: "Web browsing and automation" },
+      { id: "research", label: "Research", description: "Search and deep research" },
+      { id: "writing", label: "Writing", description: "Drafting and summarization" },
+      { id: "productivity", label: "Productivity", description: "Planning, code, and meetings" },
+      { id: "custom", label: "Custom", description: "User-created skills" },
+    ]);
   });
 
   // ============ CONFIG (global) ============

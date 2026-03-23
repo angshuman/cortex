@@ -341,6 +341,7 @@ export class FileStorage {
 
   // ============ SKILLS ============
   private skillsPath() { return path.join(this.dataDir, "skills", "skills.json"); }
+  private skillsDir() { return path.join(this.dataDir, "skills"); }
 
   getSkills(): Skill[] {
     return readJson(this.skillsPath(), []);
@@ -352,124 +353,97 @@ export class FileStorage {
     if (idx !== -1) skills[idx] = skill;
     else skills.push(skill);
     writeJson(this.skillsPath(), skills);
+    // Write-through: also save as individual file in skills directory
+    const filePath = skill.filePath || path.join(this.skillsDir(), `${skill.name}.json`);
+    skill.filePath = filePath;
+    writeJson(filePath, skill);
   }
 
   deleteSkill(name: string): boolean {
     const skills = this.getSkills();
+    const skill = skills.find(s => s.name === name);
     const filtered = skills.filter(s => s.name !== name);
     if (filtered.length === skills.length) return false;
     writeJson(this.skillsPath(), filtered);
+    // Also remove the individual file if it exists
+    if (skill?.filePath && fs.existsSync(skill.filePath)) {
+      try { fs.unlinkSync(skill.filePath); } catch {}
+    } else {
+      const defaultPath = path.join(this.skillsDir(), `${name}.json`);
+      if (fs.existsSync(defaultPath)) try { fs.unlinkSync(defaultPath); } catch {}
+    }
     return true;
   }
 
-  private initBuiltinSkills() {
-    const skills = this.getSkills();
-    const builtins: Skill[] = [
-      {
-        name: "note-taker",
-        description: "Create, read, update and search notes",
-        version: "1.0.0",
-        instructions: "You can manage notes for the user. Use the note tools to create, read, update, and search notes. Notes support markdown formatting and can have images attached.",
-        tools: [
-          { name: "create_note", description: "Create a new note", parameters: [
-            { name: "title", type: "string", description: "Note title", required: true },
-            { name: "content", type: "string", description: "Markdown content", required: true },
-            { name: "folder", type: "string", description: "Folder path (e.g. /projects)", required: false },
-            { name: "tags", type: "string[]", description: "Tags for the note", required: false },
-          ]},
-          { name: "read_note", description: "Read a note by ID", parameters: [
-            { name: "id", type: "string", description: "Note ID", required: true },
-          ]},
-          { name: "list_notes", description: "List all notes, optionally filtered by folder", parameters: [
-            { name: "folder", type: "string", description: "Filter by folder path", required: false },
-          ]},
-          { name: "update_note", description: "Update an existing note", parameters: [
-            { name: "id", type: "string", description: "Note ID", required: true },
-            { name: "title", type: "string", description: "New title", required: false },
-            { name: "content", type: "string", description: "New content", required: false },
-          ]},
-        ],
-        enabled: true,
-        builtin: true,
-      },
-      {
-        name: "task-manager",
-        description: "Create, update, and manage tasks and subtasks",
-        version: "1.0.0",
-        instructions: "You can manage tasks for the user. Tasks have statuses (todo, in_progress, done, archived), priorities (low, medium, high, urgent), and can be nested via parentId.",
-        tools: [
-          { name: "create_task", description: "Create a new task", parameters: [
-            { name: "title", type: "string", description: "Task title", required: true },
-            { name: "description", type: "string", description: "Task description", required: false },
-            { name: "priority", type: "string", description: "low|medium|high|urgent", required: false },
-            { name: "parentId", type: "string", description: "Parent task ID for subtasks", required: false },
-            { name: "dueDate", type: "string", description: "Due date ISO string", required: false },
-          ]},
-          { name: "list_tasks", description: "List all tasks", parameters: [
-            { name: "status", type: "string", description: "Filter by status", required: false },
-          ]},
-          { name: "update_task", description: "Update a task", parameters: [
-            { name: "id", type: "string", description: "Task ID", required: true },
-            { name: "status", type: "string", description: "New status", required: false },
-            { name: "title", type: "string", description: "New title", required: false },
-            { name: "priority", type: "string", description: "New priority", required: false },
-          ]},
-          { name: "complete_task", description: "Mark a task as done", parameters: [
-            { name: "id", type: "string", description: "Task ID", required: true },
-          ]},
-        ],
-        enabled: true,
-        builtin: true,
-      },
-      {
-        name: "web-search",
-        description: "Search the web and fetch URLs",
-        version: "1.1.0",
-        instructions: "You can search the web and fetch URLs. web_search queries Hacker News for stories. web_fetch retrieves any URL (APIs, pages). Use web_fetch for specific APIs like https://hacker-news.firebaseio.com/v0/topstories.json or any public endpoint. For HackerNews top stories, prefer fetching the API directly.",
-        tools: [
-          { name: "web_search", description: "Search Hacker News stories by keyword", parameters: [
-            { name: "query", type: "string", description: "Search query", required: true },
-          ]},
-          { name: "web_fetch", description: "Fetch a URL and return its contents (JSON APIs, web pages, etc.)", parameters: [
-            { name: "url", type: "string", description: "URL to fetch", required: true },
-          ]},
-        ],
-        enabled: true,
-        builtin: true,
-      },
-      {
-        name: "browser-use",
-        description: "Browse websites and interact with web pages via MCP",
-        version: "1.0.0",
-        instructions: "You can browse the web using a real browser. You can navigate to URLs, click elements, type text, take screenshots, and extract content from web pages.",
-        tools: [
-          { name: "browser_navigate", description: "Navigate to a URL", parameters: [
-            { name: "url", type: "string", description: "URL to navigate to", required: true },
-          ]},
-          { name: "browser_screenshot", description: "Take a screenshot of the current page", parameters: [] },
-          { name: "browser_click", description: "Click an element on the page", parameters: [
-            { name: "element", type: "string", description: "Element description or selector", required: true },
-          ]},
-          { name: "browser_type", description: "Type text into an input", parameters: [
-            { name: "element", type: "string", description: "Element description or selector", required: true },
-            { name: "text", type: "string", description: "Text to type", required: true },
-          ]},
-          { name: "browser_snapshot", description: "Get the accessibility tree of the current page", parameters: [] },
-        ],
-        enabled: true,
-        builtin: true,
-      },
-    ];
+  /** Load individual .json skill files from the skills directory. */
+  private loadSkillsFromDirectory(): Skill[] {
+    const dir = this.skillsDir();
+    if (!fs.existsSync(dir)) return [];
+    const dirSkills: Skill[] = [];
+    try {
+      const files = fs.readdirSync(dir).filter(f => f.endsWith(".json") && f !== "skills.json");
+      for (const file of files) {
+        try {
+          const filePath = path.join(dir, file);
+          const data = JSON.parse(fs.readFileSync(filePath, "utf-8"));
+          if (data && data.name) {
+            data.filePath = filePath;
+            dirSkills.push(data as Skill);
+          }
+        } catch { /* skip malformed files */ }
+      }
+    } catch { /* directory read error */ }
+    return dirSkills;
+  }
 
+  private initBuiltinSkills() {
+    // Import defaults lazily to avoid circular deps
+    const { defaultSkills } = require("./default-skills");
+    const existingSkills = this.getSkills();
+    const builtins: Skill[] = defaultSkills;
+
+    // Write each builtin as an individual .json file (so users can discover & edit)
+    const dir = this.skillsDir();
     for (const b of builtins) {
-      const existing = skills.findIndex(s => s.name === b.name);
-      if (existing === -1) {
-        skills.push(b);
-      } else if (skills[existing].builtin && skills[existing].version !== b.version) {
-        skills[existing] = b;
+      const filePath = path.join(dir, `${b.name}.json`);
+      b.filePath = filePath;
+      // Only write the file if it doesn't exist or the version changed
+      if (!fs.existsSync(filePath)) {
+        writeJson(filePath, b);
+      } else {
+        try {
+          const existing = JSON.parse(fs.readFileSync(filePath, "utf-8"));
+          if (existing.builtin && existing.version !== b.version) {
+            writeJson(filePath, b);
+          }
+        } catch { writeJson(filePath, b); }
       }
     }
-    writeJson(this.skillsPath(), skills);
+
+    // Load all skills from directory (includes builtins we just wrote + user custom ones)
+    const dirSkills = this.loadSkillsFromDirectory();
+
+    // Merge: directory skills take precedence. Preserve user's enabled/disabled state.
+    const merged = new Map<string, Skill>();
+    for (const b of builtins) {
+      merged.set(b.name, b);
+    }
+    for (const ds of dirSkills) {
+      merged.set(ds.name, ds);
+    }
+    // Preserve user's enabled/disabled state from existing skills.json
+    for (const existing of existingSkills) {
+      const m = merged.get(existing.name);
+      if (m && m.builtin) {
+        // Keep user's enabled preference
+        m.enabled = existing.enabled;
+      } else if (!m) {
+        // Custom skill that was in skills.json but not in directory — keep it
+        merged.set(existing.name, existing);
+      }
+    }
+
+    writeJson(this.skillsPath(), Array.from(merged.values()));
   }
 
   // ============ SEARCH ============
@@ -816,7 +790,7 @@ export class VaultManager {
         aiProvider: this.detectProviderFromEnv(),
         apiKeys: { openai: "", anthropic: "", grok: "", google: "" },
         vectorSearch: "local" as const,
-        browserBackend: "none" as const,
+        browserBackend: "playwright-mcp" as const,
         mcpServers: {},
         theme: "system" as const,
         agent: {
