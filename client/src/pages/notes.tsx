@@ -226,12 +226,6 @@ function NoteListItem({
               <Clock className="w-2.5 h-2.5" />
               {timeAgo}
             </span>
-            {note.folder !== "/" && (
-              <span className="text-[10px] text-muted-foreground/40 flex items-center gap-0.5">
-                <FolderOpen className="w-2.5 h-2.5" />
-                {note.folder}
-              </span>
-            )}
             {note.tags.length > 0 && (
               <Badge variant="secondary" className="text-[9px] px-1 py-0 h-3.5 font-normal">
                 {note.tags[0]}{note.tags.length > 1 ? ` +${note.tags.length - 1}` : ""}
@@ -256,11 +250,8 @@ export default function NotesPage() {
   const [editMode, setEditMode] = useState(false);
   const [editTitle, setEditTitle] = useState("");
   const [editContent, setEditContent] = useState("");
-  const [selectedFolder, setSelectedFolder] = useState<string>("/");
   const [searchQuery, setSearchQuery] = useState("");
-  const [showNewNote, setShowNewNote] = useState(false);
-  const [newTitle, setNewTitle] = useState("");
-  const [newFolder, setNewFolder] = useState("/");
+
   const [chatOpen, setChatOpen] = useState(true);
   const [viewMode, setViewMode] = useState<"edit" | "preview">("edit");
   const [contextNoteIds, setContextNoteIds] = useState<Set<string>>(new Set());
@@ -283,26 +274,17 @@ export default function NotesPage() {
     enabled: !!vaultId,
   });
 
-  const { data: folders = [] } = useQuery<string[]>({
-    queryKey: ["/api/notes/folders", vaultId],
-    queryFn: () => apiRequest("GET", withVault("/api/notes/folders", vaultParam)).then(r => r.json()),
-    staleTime: 0,
-    refetchOnMount: "always",
-    enabled: !!vaultId,
-  });
+
 
   const createNote = useMutation({
     mutationFn: (data: any) => apiRequest("POST", withVault("/api/notes", vaultParam), data).then(r => r.json()),
     onSuccess: (note) => {
       queryClient.invalidateQueries({ queryKey: ["/api/notes"] });
-      queryClient.invalidateQueries({ queryKey: ["/api/notes/folders"] });
       setSelectedNote(note);
       setEditMode(true);
       setViewMode("edit");
       setEditTitle(note.title);
       setEditContent(note.content);
-      setShowNewNote(false);
-      setNewTitle("");
     },
   });
 
@@ -318,7 +300,6 @@ export default function NotesPage() {
     mutationFn: (id: string) => apiRequest("DELETE", withVault(`/api/notes/${id}`, vaultParam)),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["/api/notes"] });
-      queryClient.invalidateQueries({ queryKey: ["/api/notes/folders"] });
       setSelectedNote(null);
       setEditMode(false);
     },
@@ -387,10 +368,9 @@ export default function NotesPage() {
 
   const filteredNotes = useMemo(() =>
     notes
-      .filter(n => selectedFolder === "/" ? true : n.folder === selectedFolder || n.folder.startsWith(selectedFolder + "/"))
       .filter(n => !searchQuery || n.title.toLowerCase().includes(searchQuery.toLowerCase()) || n.content.toLowerCase().includes(searchQuery.toLowerCase()))
       .sort((a, b) => (b.pinned ? 1 : 0) - (a.pinned ? 1 : 0) || new Date(b.updatedAt).getTime() - new Date(a.updatedAt).getTime()),
-    [notes, selectedFolder, searchQuery]
+    [notes, searchQuery]
   );
 
   const selectNote = (note: Note) => {
@@ -489,7 +469,7 @@ export default function NotesPage() {
             const f = e.target.files?.[0];
             if (f) handleDump(undefined, f);
           }} />
-          <Button size="sm" variant="default" className="text-xs gap-1" onClick={() => setShowNewNote(true)} data-testid="button-new-note">
+          <Button size="sm" variant="default" className="text-xs gap-1" onClick={() => createNote.mutate({ title: "Untitled", content: "" })} data-testid="button-new-note">
             <Plus className="w-3.5 h-3.5" /> New Note
           </Button>
         </div>
@@ -511,19 +491,7 @@ export default function NotesPage() {
               />
             </div>
 
-            {/* Folder filter */}
-            <Select value={selectedFolder} onValueChange={setSelectedFolder}>
-              <SelectTrigger className="h-7 text-xs border-border/30">
-                <Folder className="w-3 h-3 mr-1 text-muted-foreground/50" />
-                <SelectValue />
-              </SelectTrigger>
-              <SelectContent>
-                <SelectItem value="/">All Notes</SelectItem>
-                {folders.filter(f => f !== "/").map(f => (
-                  <SelectItem key={f} value={f}>{f}</SelectItem>
-                ))}
-              </SelectContent>
-            </Select>
+
           </div>
 
           {/* Notes list */}
@@ -580,12 +548,7 @@ export default function NotesPage() {
                 ) : (
                   <div className="flex items-center gap-2 flex-1 min-w-0">
                     <span className="text-[13px] font-semibold truncate">{selectedNote.title}</span>
-                    {selectedNote.folder !== "/" && (
-                      <span className="text-[10px] text-muted-foreground/40 flex items-center gap-0.5 shrink-0">
-                        <FolderOpen className="w-2.5 h-2.5" />
-                        {selectedNote.folder}
-                      </span>
-                    )}
+
                   </div>
                 )}
                 <div className="flex items-center gap-1 shrink-0">
@@ -757,54 +720,6 @@ export default function NotesPage() {
         />
       </div>
 
-      {/* New note sheet */}
-      <Sheet open={showNewNote} onOpenChange={setShowNewNote}>
-        <SheetContent side="right" className="w-full sm:max-w-md p-0 flex flex-col border-l border-border/50">
-          <SheetHeader className="sr-only">
-            <SheetTitle>New Note</SheetTitle>
-            <SheetDescription>Create a new note</SheetDescription>
-          </SheetHeader>
-          <div className="flex items-center gap-2 px-5 h-14 border-b border-border/50 shrink-0">
-            <Plus className="w-4 h-4 text-muted-foreground" />
-            <span className="text-sm font-medium">New Note</span>
-          </div>
-          <div className="px-5 py-5 space-y-4">
-            <div className="space-y-1">
-              <label className="text-[10px] uppercase tracking-wider text-muted-foreground/60 font-medium">Title</label>
-              <Input
-                placeholder="Note title"
-                value={newTitle}
-                onChange={(e) => setNewTitle(e.target.value)}
-                className="text-sm"
-                autoFocus
-                data-testid="input-new-note-title"
-              />
-            </div>
-            <div className="space-y-1">
-              <label className="text-[10px] uppercase tracking-wider text-muted-foreground/60 font-medium">Folder</label>
-              <Select value={newFolder} onValueChange={setNewFolder}>
-                <SelectTrigger className="text-xs h-8">
-                  <SelectValue placeholder="Folder" />
-                </SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="/">Root</SelectItem>
-                  <SelectItem value="/inbox">Inbox</SelectItem>
-                  <SelectItem value="/projects">Projects</SelectItem>
-                  <SelectItem value="/personal">Personal</SelectItem>
-                  <SelectItem value="/work">Work</SelectItem>
-                </SelectContent>
-              </Select>
-            </div>
-            <Button
-              className="w-full text-sm"
-              onClick={() => createNote.mutate({ title: newTitle || "Untitled", content: "", folder: newFolder })}
-              data-testid="button-create-note"
-            >
-              Create Note
-            </Button>
-          </div>
-        </SheetContent>
-      </Sheet>
 
       {/* Image lightbox */}
       {lightbox && (

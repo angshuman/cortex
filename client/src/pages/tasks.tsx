@@ -569,13 +569,7 @@ function TaskDetailPanel({
 export default function TasksPage() {
   const [view, setView] = useState<"list" | "kanban">("list");
   const [detailTask, setDetailTask] = useState<Task | null>(null);
-  const [showNewTask, setShowNewTask] = useState(false);
-  const [newTaskStatus, setNewTaskStatus] = useState("todo");
-  const [newTitle, setNewTitle] = useState("");
-  const [newDesc, setNewDesc] = useState("");
-  const [newPriority, setNewPriority] = useState("medium");
-  const [newDueDate, setNewDueDate] = useState("");
-  const [newParentId, setNewParentId] = useState<string>("");
+
   const [filterStatuses, setFilterStatuses] = useState<Set<string>>(new Set(DEFAULT_VISIBLE_STATUSES));
   const [chatOpen, setChatOpen] = useState(true);
   const chatPanel = useResizablePanel({ defaultWidth: 420, minWidth: 280, maxWidth: 800, storageKey: "cortex-tasks-chat-width", reverse: true });
@@ -599,14 +593,9 @@ export default function TasksPage() {
 
   const createTask = useMutation({
     mutationFn: (data: any) => apiRequest("POST", withVault("/api/tasks", vaultParam), data).then(r => r.json()),
-    onSuccess: () => {
+    onSuccess: (task) => {
       queryClient.invalidateQueries({ queryKey: ["/api/tasks"] });
-      setShowNewTask(false);
-      setNewTitle("");
-      setNewDesc("");
-      setNewPriority("medium");
-      setNewDueDate("");
-      setNewParentId("");
+      setDetailTask(task);
       toast({ title: "Task created" });
     },
   });
@@ -748,8 +737,7 @@ export default function TasksPage() {
   const activeTask = activeId ? tasks.find(t => t.id === activeId) : null;
 
   const handleAddTaskInColumn = (status: string) => {
-    setNewTaskStatus(status);
-    setShowNewTask(true);
+    createTask.mutate({ title: "Untitled Task", status });
   };
 
   // ============ LIST VIEW ROW ============
@@ -885,7 +873,7 @@ export default function TasksPage() {
             size="sm"
             variant="default"
             className="text-xs gap-1"
-            onClick={() => { setNewTaskStatus("todo"); setShowNewTask(true); }}
+            onClick={() => createTask.mutate({ title: "Untitled Task" })}
             data-testid="button-new-task"
           >
             <Plus className="w-3.5 h-3.5" /> New Task
@@ -958,121 +946,6 @@ export default function TasksPage() {
         />
       </div>
 
-      {/* New task dialog (using Sheet for consistency) */}
-      <Sheet open={showNewTask} onOpenChange={setShowNewTask}>
-        <SheetContent side="right" className="w-full sm:max-w-md p-0 flex flex-col border-l border-border/50">
-          <SheetHeader className="sr-only">
-            <SheetTitle>New Task</SheetTitle>
-            <SheetDescription>Create a new task</SheetDescription>
-          </SheetHeader>
-          <div className="flex items-center gap-2 px-5 h-14 border-b border-border/50 shrink-0">
-            <Plus className="w-4 h-4 text-muted-foreground" />
-            <span className="text-sm font-medium">New Task</span>
-          </div>
-          <ScrollArea className="flex-1">
-            <div className="px-5 py-5 space-y-4">
-              <div className="space-y-1">
-                <label className="text-[10px] uppercase tracking-wider text-muted-foreground/60 font-medium">Title</label>
-                <Input
-                  placeholder="What needs to be done?"
-                  value={newTitle}
-                  onChange={(e) => setNewTitle(e.target.value)}
-                  className="text-sm"
-                  autoFocus
-                  data-testid="input-new-task-title"
-                />
-              </div>
-              <div className="space-y-1">
-                <label className="text-[10px] uppercase tracking-wider text-muted-foreground/60 font-medium">Description</label>
-                <Textarea
-                  placeholder="Add details (supports markdown)..."
-                  value={newDesc}
-                  onChange={(e) => setNewDesc(e.target.value)}
-                  className="text-sm min-h-[120px] font-mono"
-                  data-testid="input-new-task-desc"
-                />
-              </div>
-              <div className="grid grid-cols-2 gap-3">
-                <div className="space-y-1">
-                  <label className="text-[10px] uppercase tracking-wider text-muted-foreground/60 font-medium">Status</label>
-                  <Select value={newTaskStatus} onValueChange={setNewTaskStatus}>
-                    <SelectTrigger className="text-xs h-8">
-                      <SelectValue />
-                    </SelectTrigger>
-                    <SelectContent>
-                      {Object.entries(statusConfig).filter(([k]) => k !== "archived").map(([key, cfg]) => (
-                        <SelectItem key={key} value={key}>
-                          <span className="flex items-center gap-1.5">
-                            <cfg.icon className={`w-3 h-3 ${cfg.color}`} />
-                            {cfg.label}
-                          </span>
-                        </SelectItem>
-                      ))}
-                    </SelectContent>
-                  </Select>
-                </div>
-                <div className="space-y-1">
-                  <label className="text-[10px] uppercase tracking-wider text-muted-foreground/60 font-medium">Priority</label>
-                  <Select value={newPriority} onValueChange={setNewPriority}>
-                    <SelectTrigger className="text-xs h-8">
-                      <SelectValue />
-                    </SelectTrigger>
-                    <SelectContent>
-                      {Object.entries(priorityConfig).map(([key, cfg]) => (
-                        <SelectItem key={key} value={key}>
-                          <span className="flex items-center gap-1.5">
-                            <span className={`w-2 h-2 rounded-full ${cfg.dotColor}`} />
-                            {cfg.label}
-                          </span>
-                        </SelectItem>
-                      ))}
-                    </SelectContent>
-                  </Select>
-                </div>
-              </div>
-              <div className="space-y-1">
-                <label className="text-[10px] uppercase tracking-wider text-muted-foreground/60 font-medium">Due Date</label>
-                <Input
-                  type="date"
-                  value={newDueDate}
-                  onChange={(e) => setNewDueDate(e.target.value)}
-                  className="text-xs h-8"
-                />
-              </div>
-              {tasks.filter(t => !t.parentId).length > 0 && (
-                <div className="space-y-1">
-                  <label className="text-[10px] uppercase tracking-wider text-muted-foreground/60 font-medium">Parent Task</label>
-                  <Select value={newParentId} onValueChange={setNewParentId}>
-                    <SelectTrigger className="text-xs h-8">
-                      <SelectValue placeholder="None" />
-                    </SelectTrigger>
-                    <SelectContent>
-                      <SelectItem value="none">No parent</SelectItem>
-                      {tasks.filter(t => !t.parentId).map(t => (
-                        <SelectItem key={t.id} value={t.id}>{t.title}</SelectItem>
-                      ))}
-                    </SelectContent>
-                  </Select>
-                </div>
-              )}
-              <Button
-                className="w-full text-sm mt-2"
-                onClick={() => createTask.mutate({
-                  title: newTitle || "Untitled Task",
-                  description: newDesc,
-                  status: newTaskStatus,
-                  priority: newPriority,
-                  dueDate: newDueDate || null,
-                  parentId: newParentId && newParentId !== "none" ? newParentId : null,
-                })}
-                data-testid="button-create-task"
-              >
-                Create Task
-              </Button>
-            </div>
-          </ScrollArea>
-        </SheetContent>
-      </Sheet>
 
       {/* Task detail slide-over */}
       <TaskDetailPanel

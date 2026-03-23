@@ -44,7 +44,7 @@ export class FileStorage {
   private initVaultDirs() {
     ensureDir(this.dataDir);
     ensureDir(path.join(this.dataDir, "notes"));
-    ensureDir(path.join(this.dataDir, "notes", "inbox"));
+
     ensureDir(path.join(this.dataDir, "notes", "assets"));
     ensureDir(path.join(this.dataDir, "tasks"));
     ensureDir(path.join(this.dataDir, "chat", "sessions"));
@@ -125,7 +125,6 @@ export class FileStorage {
     const notes = this.getNotesIndex();
     const folders = new Set(notes.map(n => n.folder));
     folders.add("/");
-    folders.add("/inbox");
     return Array.from(folders).sort();
   }
 

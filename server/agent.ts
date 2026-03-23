@@ -504,7 +504,7 @@ When a user sends images:
   2. Create a note with a descriptive title summarizing the image content
   3. Include the image in the note markdown using the exact URL provided: \`![description](/api/chat/assets/xxx.png)\`
   4. Add metadata tags (e.g. screenshot, diagram, photo, receipt, code, whiteboard, document)
-  5. Put it in /inbox folder
+  5. Save it in the vault
 - IMPORTANT: When creating notes from images, pass the image URLs via the \`image_urls\` parameter on \`create_note\`. This automatically copies the image into the note's own assets folder. Also include the URL in the markdown content as \`![description](url)\` — the system rewrites it to the copied path.
 - Never fabricate or guess image URLs — always use the exact URLs provided in the message.
 
@@ -667,7 +667,7 @@ export class Agent {
     }
 
     // If user sent only image(s) with no text, inject auto-analysis instruction
-    const effectiveMessage = userMessage || "The user pasted this image without any text. Analyze the image thoroughly: describe what you see, extract any text/data, identify key information, and then automatically save it as a note with a descriptive title. Include the image in the note content using the image URLs provided. Add relevant tags based on the content (e.g. screenshot, diagram, photo, receipt, code, whiteboard, etc). Put it in the /inbox folder.";
+    const effectiveMessage = userMessage || "The user pasted this image without any text. Analyze the image thoroughly: describe what you see, extract any text/data, identify key information, and then automatically save it as a note with a descriptive title. Include the image in the note content using the image URLs provided. Add relevant tags based on the content (e.g. screenshot, diagram, photo, receipt, code, whiteboard, etc). Save it in the vault.";
     contentBlocks.push({ type: "text", text: effectiveMessage });
 
     this.messages.push({ role: "user", content: contentBlocks });

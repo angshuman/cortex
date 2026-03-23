@@ -152,7 +152,7 @@ export function registerRoutes(server: Server, app: Express) {
     const store = getVaultStorage(req);
     const title = req.body.title || `Dump ${new Date().toLocaleString()}`;
     let content = req.body.content || "";
-    let note = store.createNote({ title, content, folder: "/inbox", tags: ["dump"] });
+    let note = store.createNote({ title, content, folder: "/", tags: ["dump"] });
     if (req.file) {
       const filename = `${Date.now()}-${req.file.originalname}`;
       const url = store.saveNoteAsset(note.id, filename, req.file.buffer);
