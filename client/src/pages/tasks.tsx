@@ -60,6 +60,7 @@ import {
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
 import { ContextChat, type ContextItem } from "@/components/context-chat";
+import { ResizeHandle, useResizablePanel } from "@/components/resize-handle";
 import { useToast } from "@/hooks/use-toast";
 import { marked } from "marked";
 import {
@@ -577,6 +578,7 @@ export default function TasksPage() {
   const [newParentId, setNewParentId] = useState<string>("");
   const [filterStatuses, setFilterStatuses] = useState<Set<string>>(new Set(DEFAULT_VISIBLE_STATUSES));
   const [chatOpen, setChatOpen] = useState(true);
+  const chatPanel = useResizablePanel({ defaultWidth: 350, minWidth: 280, maxWidth: 500, storageKey: "cortex-tasks-chat-width", reverse: true });
   const [activeId, setActiveId] = useState<string | null>(null);
   const queryClient = useQueryClient();
   const { toast } = useToast();
@@ -931,9 +933,11 @@ export default function TasksPage() {
         </div>
 
         {/* Context-aware AI chat panel */}
+        {chatOpen && <ResizeHandle onMouseDown={chatPanel.onMouseDown} isResizing={chatPanel.isResizing} />}
         <ContextChat
           open={chatOpen}
           onClose={() => setChatOpen(false)}
+          width={chatPanel.width}
           context={filteredTasks.filter(t => t.status !== "archived").slice(0, 20).map(t => ({
             type: "task" as const,
             title: t.title,

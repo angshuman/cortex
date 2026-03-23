@@ -62,6 +62,7 @@ import {
   ChevronRight,
 } from "lucide-react";
 import { ContextChat, type ContextItem } from "@/components/context-chat";
+import { ResizeHandle, useResizablePanel } from "@/components/resize-handle";
 import { marked } from "marked";
 import { useToast } from "@/hooks/use-toast";
 
@@ -253,6 +254,9 @@ export default function NotesPage() {
   const { toast } = useToast();
   const { vaultParam, vaultId } = useVault();
 
+  const noteList = useResizablePanel({ defaultWidth: 280, minWidth: 200, maxWidth: 420, storageKey: "cortex-notes-list-width" });
+  const chatPanel = useResizablePanel({ defaultWidth: 350, minWidth: 280, maxWidth: 500, storageKey: "cortex-notes-chat-width", reverse: true });
+
   const { data: notes = [] } = useQuery<Note[]>({
     queryKey: ["/api/notes", vaultId],
     queryFn: () => apiRequest("GET", withVault("/api/notes", vaultParam)).then(r => r.json()),
@@ -411,7 +415,7 @@ export default function NotesPage() {
 
       <div className="flex-1 flex min-h-0">
         {/* Sidebar: Folders + Note list */}
-        <div className="w-[280px] border-r border-border/50 flex flex-col shrink-0">
+        <div className="border-r border-border/50 flex flex-col shrink-0" style={{ width: noteList.width }}>
           <div className="p-2 space-y-2">
             {/* Search */}
             <div className="relative">
@@ -464,8 +468,10 @@ export default function NotesPage() {
           </ScrollArea>
         </div>
 
+        <ResizeHandle onMouseDown={noteList.onMouseDown} isResizing={noteList.isResizing} />
+
         {/* Note content area */}
-        <div className={`flex-1 flex flex-col min-w-0 ${chatOpen ? "max-w-[calc(100%-280px-400px)]" : ""}`}>
+        <div className="flex-1 flex flex-col min-w-0">
           {!selectedNote ? (
             <div className="flex-1 flex items-center justify-center">
               <div className="text-center">
@@ -646,9 +652,11 @@ export default function NotesPage() {
         </div>
 
         {/* Context-aware AI chat panel */}
+        {chatOpen && <ResizeHandle onMouseDown={chatPanel.onMouseDown} isResizing={chatPanel.isResizing} />}
         <ContextChat
           open={chatOpen}
           onClose={() => setChatOpen(false)}
+          width={chatPanel.width}
           context={selectedNote ? [{
             type: "note" as const,
             title: selectedNote.title,

@@ -43,9 +43,12 @@ interface ContextChatProps {
   open: boolean;
   onClose: () => void;
   placeholder?: string;
+  /** Dynamic width in px — if undefined, defaults to 350 */
+  width?: number;
+  style?: React.CSSProperties;
 }
 
-export function ContextChat({ context, open, onClose, placeholder }: ContextChatProps) {
+export function ContextChat({ context, open, onClose, placeholder, width, style }: ContextChatProps) {
   const [events, setEvents] = useState<ChatEvent[]>([]);
   const [input, setInput] = useState("");
   const [status, setStatus] = useState<"idle" | "thinking">("idle");
@@ -314,7 +317,7 @@ export function ContextChat({ context, open, onClose, placeholder }: ContextChat
   if (!open) return null;
 
   return (
-    <div className="w-[400px] border-l border-border/50 flex flex-col bg-background shrink-0 h-full" data-testid="context-chat-panel">
+    <div className="border-l border-border/50 flex flex-col bg-background shrink-0 h-full" style={{ width: width ?? 350, ...style }} data-testid="context-chat-panel">
       {/* Header */}
       <div className="flex items-center gap-2 px-3 h-10 border-b border-border/50 shrink-0">
         <MessageSquare className="w-3.5 h-3.5 text-primary" />
@@ -330,7 +333,7 @@ export function ContextChat({ context, open, onClose, placeholder }: ContextChat
           {context.map((item, i) => (
             <Badge key={i} variant="secondary" className="text-[9px] px-1.5 py-0 h-4 gap-1">
               {item.type === "note" ? <FileText className="w-2.5 h-2.5" /> : <CheckSquare className="w-2.5 h-2.5" />}
-              {item.title.slice(0, 25)}{item.title.length > 25 ? "..." : ""}
+              <span className="truncate max-w-[180px] inline-block align-bottom" title={item.title}>{item.title}</span>
             </Badge>
           ))}
         </div>
