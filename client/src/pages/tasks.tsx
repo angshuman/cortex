@@ -1,4 +1,4 @@
-import { useState, useCallback, useMemo } from "react";
+import { useState, useCallback, useMemo, useEffect } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { apiRequest, withVault } from "@/lib/queryClient";
 import { useVault } from "@/hooks/use-vault";
@@ -637,6 +637,16 @@ export default function TasksPage() {
       toast({ title: "Task deleted" });
     },
   });
+
+  // Sync detailTask from fresh query data (e.g. after AI updates the task)
+  useEffect(() => {
+    if (!detailTask) return;
+    const fresh = tasks.find(t => t.id === detailTask.id);
+    if (!fresh) return;
+    if (fresh.updatedAt !== detailTask.updatedAt) {
+      setDetailTask(fresh);
+    }
+  }, [tasks]); // eslint-disable-line react-hooks/exhaustive-deps
 
   const toggleDone = useCallback((task: Task) => {
     updateTask.mutate({

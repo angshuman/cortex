@@ -401,6 +401,22 @@ export default function NotesPage() {
     setEditContent(note.content);
   };
 
+  // Sync selectedNote from fresh query data (e.g. after AI updates the note)
+  useEffect(() => {
+    if (!selectedNote) return;
+    const fresh = notes.find(n => n.id === selectedNote.id);
+    if (!fresh) return;
+    // Only update if the note actually changed
+    if (fresh.updatedAt !== selectedNote.updatedAt) {
+      setSelectedNote(fresh);
+      // Update edit fields only if NOT actively editing
+      if (!editMode) {
+        setEditTitle(fresh.title);
+        setEditContent(fresh.content);
+      }
+    }
+  }, [notes]); // eslint-disable-line react-hooks/exhaustive-deps
+
   const toggleNoteContext = useCallback((noteId: string) => {
     setContextNoteIds(prev => {
       const next = new Set(prev);
