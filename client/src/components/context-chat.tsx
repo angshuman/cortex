@@ -295,7 +295,7 @@ export function ContextChat({ context, open, onClose, placeholder, width, style,
           const textContent = event.content.replace(/!\[image\]\([^)]+\)\n?/g, "").trim();
           return (
             <div key={event.id || idx} className="flex justify-end mb-3">
-              <div className="max-w-[85%] bg-primary text-primary-foreground rounded-2xl rounded-br-md px-3 py-2">
+              <div className="max-w-[85%] bg-muted/40 border border-border/30 text-foreground rounded-2xl rounded-br-md px-3 py-2">
                 {userImages.length > 0 && (
                   <div className="flex flex-wrap gap-1 mb-1">
                     {userImages.map((url, i) => (
@@ -310,8 +310,8 @@ export function ContextChat({ context, open, onClose, placeholder, width, style,
         }
         return (
           <div key={event.id || idx} className="flex mb-3 gap-2">
-            <div className="flex-shrink-0 w-6 h-6 rounded-full bg-primary/10 flex items-center justify-center mt-0.5">
-              <Sparkles className="w-3 h-3 text-primary" />
+            <div className="flex-shrink-0 w-6 h-6 rounded-full bg-muted/60 flex items-center justify-center mt-0.5">
+              <Sparkles className="w-3 h-3 text-muted-foreground" />
             </div>
             <div className="flex-1 min-w-0">
               <div
@@ -325,8 +325,8 @@ export function ContextChat({ context, open, onClose, placeholder, width, style,
       case "thought":
         return (
           <div key={event.id || idx} className="flex mb-1.5 gap-2 items-center">
-            <div className="flex-shrink-0 w-6 h-6 rounded-full bg-amber-500/10 flex items-center justify-center">
-              <Brain className="w-3 h-3 text-amber-500" />
+            <div className="flex-shrink-0 w-6 h-6 rounded-full bg-muted/60 flex items-center justify-center">
+              <Brain className="w-3 h-3 text-muted-foreground" />
             </div>
             <p className="text-[10px] text-muted-foreground/70 italic leading-none">{event.content}</p>
           </div>
@@ -338,8 +338,8 @@ export function ContextChat({ context, open, onClose, placeholder, width, style,
           const isExpanded = expandedTools.has(event.id || String(idx));
           return (
             <div key={event.id || idx} className="flex mb-1 gap-2 items-start">
-              <div className="flex-shrink-0 w-6 h-6 rounded-full bg-blue-500/10 flex items-center justify-center">
-                <Wrench className="w-3 h-3 text-blue-500" />
+              <div className="flex-shrink-0 w-6 h-6 rounded-full bg-muted/60 flex items-center justify-center">
+                <Wrench className="w-3 h-3 text-muted-foreground" />
               </div>
               <div className="flex-1 min-w-0">
                 <button
@@ -402,7 +402,7 @@ export function ContextChat({ context, open, onClose, placeholder, width, style,
     <div className="border-l border-border/50 flex flex-col bg-background shrink-0 h-full" style={{ width: width ?? 350, ...style }} data-testid="context-chat-panel">
       {/* Header */}
       <div className="flex items-center gap-2 px-3 h-10 border-b border-border/50 shrink-0">
-        <MessageSquare className="w-3.5 h-3.5 text-primary" />
+        <MessageSquare className="w-3.5 h-3.5 text-muted-foreground" />
         <span className="text-xs font-medium flex-1">AI Chat</span>
         <Button variant="ghost" size="icon" className="h-6 w-6" onClick={onClose} data-testid="button-close-chat">
           <X className="w-3.5 h-3.5" />
@@ -434,8 +434,8 @@ export function ContextChat({ context, open, onClose, placeholder, width, style,
       <div ref={scrollRef} className="flex-1 overflow-y-auto px-3 py-3">
         {events.length === 0 && (
           <div className="flex flex-col items-center justify-center h-full text-center px-4">
-            <div className="w-8 h-8 rounded-full bg-primary/5 flex items-center justify-center mb-2">
-              <Sparkles className="w-3.5 h-3.5 text-primary/30" />
+            <div className="w-8 h-8 rounded-full bg-muted/40 flex items-center justify-center mb-2">
+              <Sparkles className="w-3.5 h-3.5 text-muted-foreground/40" />
             </div>
             <p className="text-xs text-muted-foreground/40">
               {context.length > 0
@@ -450,8 +450,8 @@ export function ContextChat({ context, open, onClose, placeholder, width, style,
         {events.map((e, i) => renderEvent(e, i))}
         {status === "thinking" && (
           <div className="flex mb-2 gap-2 items-center">
-            <div className="flex-shrink-0 w-6 h-6 rounded-full bg-primary/10 flex items-center justify-center">
-              <Loader2 className="w-3 h-3 text-primary animate-spin" />
+            <div className="flex-shrink-0 w-6 h-6 rounded-full bg-muted/60 flex items-center justify-center">
+              <Loader2 className="w-3 h-3 text-muted-foreground animate-spin" />
             </div>
             <span className="text-[10px] text-muted-foreground/60 leading-none">Thinking...</span>
           </div>
@@ -476,7 +476,7 @@ export function ContextChat({ context, open, onClose, placeholder, width, style,
                 />
                 {img.uploading && (
                   <div className="absolute inset-0 flex items-center justify-center">
-                    <Loader2 className="w-3 h-3 animate-spin text-primary" />
+                    <Loader2 className="w-3 h-3 animate-spin text-muted-foreground" />
                   </div>
                 )}
                 <button

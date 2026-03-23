@@ -206,7 +206,7 @@ export default function ChatPage() {
           const textContent = event.content.replace(/!\[image\]\([^)]+\)\n?/g, "").trim();
           return (
             <div key={event.id || idx} className="flex justify-end mb-4">
-              <div className="max-w-[80%] bg-primary text-primary-foreground rounded-2xl rounded-br-md px-4 py-2.5">
+              <div className="max-w-[80%] bg-muted/40 border border-border/30 text-foreground rounded-2xl rounded-br-md px-4 py-2.5">
                 {userImages.length > 0 && (
                   <div className="flex flex-wrap gap-1.5 mb-1.5">
                     {userImages.map((url, i) => (
@@ -227,8 +227,8 @@ export default function ChatPage() {
         }
         return (
           <div key={event.id || idx} className="flex mb-4 gap-3">
-            <div className="flex-shrink-0 w-7 h-7 rounded-full bg-primary/10 flex items-center justify-center mt-0.5">
-              <Sparkles className="w-3.5 h-3.5 text-primary" />
+            <div className="flex-shrink-0 w-7 h-7 rounded-full bg-muted/60 flex items-center justify-center mt-0.5">
+              <Sparkles className="w-3.5 h-3.5 text-muted-foreground" />
             </div>
             <div className="flex-1 min-w-0">
               <div
@@ -242,8 +242,8 @@ export default function ChatPage() {
       case "thought":
         return (
           <div key={event.id || idx} className="flex mb-2 gap-3 items-start">
-            <div className="flex-shrink-0 w-7 h-7 rounded-full bg-amber-500/10 flex items-center justify-center mt-0.5">
-              <Brain className="w-3.5 h-3.5 text-amber-500" />
+            <div className="flex-shrink-0 w-7 h-7 rounded-full bg-muted/60 flex items-center justify-center mt-0.5">
+              <Brain className="w-3.5 h-3.5 text-muted-foreground" />
             </div>
             <div className="flex-1 min-w-0">
               <p className="text-xs text-muted-foreground italic">{event.content}</p>
@@ -257,13 +257,13 @@ export default function ChatPage() {
           const isExpanded = expandedTools.has(event.id || String(idx));
           return (
             <div key={event.id || idx} className="flex mb-1 gap-3 items-start">
-              <div className="flex-shrink-0 w-7 h-7 rounded-full bg-blue-500/10 flex items-center justify-center mt-0.5">
-                <Wrench className="w-3.5 h-3.5 text-blue-500" />
+              <div className="flex-shrink-0 w-7 h-7 rounded-full bg-muted/60 flex items-center justify-center mt-0.5">
+                <Wrench className="w-3.5 h-3.5 text-muted-foreground" />
               </div>
               <div className="flex-1 min-w-0">
                 <button
                   onClick={() => toggleToolExpand(event.id || String(idx))}
-                  className="flex items-center gap-1.5 text-xs text-blue-500 hover:text-blue-400 transition-colors"
+                  className="flex items-center gap-1.5 text-xs text-muted-foreground hover:text-foreground transition-colors"
                 >
                   {isExpanded ? <ChevronDown className="w-3 h-3" /> : <ChevronRight className="w-3 h-3" />}
                   <Badge variant="secondary" className="text-[10px] px-1.5 py-0 h-4 font-mono">
@@ -334,8 +334,8 @@ export default function ChatPage() {
         </header>
         <div className="flex-1 flex items-center justify-center">
           <div className="text-center max-w-md">
-            <div className="w-16 h-16 rounded-2xl bg-primary/10 flex items-center justify-center mx-auto mb-4">
-              <Brain className="w-8 h-8 text-primary" />
+            <div className="w-16 h-16 rounded-2xl bg-muted/40 flex items-center justify-center mx-auto mb-4">
+              <Brain className="w-8 h-8 text-muted-foreground" />
             </div>
             <h2 className="text-lg font-semibold mb-2">Cortex</h2>
             <p className="text-sm text-muted-foreground mb-6">Your personal AI operating system. Ask me anything, create notes, manage tasks, or browse the web.</p>
@@ -371,8 +371,8 @@ export default function ChatPage() {
           {events.length === 0 && (
             <div className="flex items-center justify-center h-full min-h-[300px]">
               <div className="text-center">
-                <div className="w-12 h-12 rounded-xl bg-primary/10 flex items-center justify-center mx-auto mb-3">
-                  <Brain className="w-6 h-6 text-primary" />
+                <div className="w-12 h-12 rounded-xl bg-muted/40 flex items-center justify-center mx-auto mb-3">
+                  <Brain className="w-6 h-6 text-muted-foreground" />
                 </div>
                 <p className="text-sm text-muted-foreground">Send a message to start</p>
               </div>
@@ -381,13 +381,13 @@ export default function ChatPage() {
           {events.map((e, i) => renderEvent(e, i))}
           {status === "thinking" && events.length > 0 && (
             <div className="flex mb-3 gap-3 items-center">
-              <div className="flex-shrink-0 w-7 h-7 rounded-full bg-primary/10 flex items-center justify-center">
-                <Loader2 className="w-3.5 h-3.5 text-primary animate-spin" />
+              <div className="flex-shrink-0 w-7 h-7 rounded-full bg-muted/60 flex items-center justify-center">
+                <Loader2 className="w-3.5 h-3.5 text-muted-foreground animate-spin" />
               </div>
               <div className="flex gap-1">
-                <span className="w-1.5 h-1.5 rounded-full bg-primary/40 animate-bounce" style={{ animationDelay: "0ms" }} />
-                <span className="w-1.5 h-1.5 rounded-full bg-primary/40 animate-bounce" style={{ animationDelay: "150ms" }} />
-                <span className="w-1.5 h-1.5 rounded-full bg-primary/40 animate-bounce" style={{ animationDelay: "300ms" }} />
+                <span className="w-1.5 h-1.5 rounded-full bg-muted-foreground/40 animate-bounce" style={{ animationDelay: "0ms" }} />
+                <span className="w-1.5 h-1.5 rounded-full bg-muted-foreground/40 animate-bounce" style={{ animationDelay: "150ms" }} />
+                <span className="w-1.5 h-1.5 rounded-full bg-muted-foreground/40 animate-bounce" style={{ animationDelay: "300ms" }} />
               </div>
             </div>
           )}
@@ -396,7 +396,7 @@ export default function ChatPage() {
 
       {/* Input */}
       <div
-        className={`border-t border-border/50 bg-background px-4 py-3 shrink-0 transition-colors ${isDragging ? "bg-primary/5 border-primary/30" : ""}`}
+        className={`border-t border-border/50 bg-background px-4 py-3 shrink-0 transition-colors ${isDragging ? "bg-muted/30 border-border" : ""}`}
         onDrop={(e) => { handleDrop(e); setIsDragging(false); }}
         onDragOver={(e) => { handleDragOver(e); setIsDragging(true); }}
         onDragLeave={() => setIsDragging(false)}
@@ -414,7 +414,7 @@ export default function ChatPage() {
                   />
                   {img.uploading && (
                     <div className="absolute inset-0 flex items-center justify-center">
-                      <Loader2 className="w-4 h-4 animate-spin text-primary" />
+                      <Loader2 className="w-4 h-4 animate-spin text-muted-foreground" />
                     </div>
                   )}
                   <button

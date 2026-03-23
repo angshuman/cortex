@@ -141,8 +141,8 @@ function getIconPath(): string {
   if (app.isPackaged) {
     return path.join(process.resourcesPath, "icons", "icon.png");
   }
-  const iconPath = path.join(__dirname, "..", "electron", "icons", "icon.png");
-  // Fallback if icon doesn't exist yet
+  // In dev, __dirname is dist/electron/ — go up two levels to project root
+  const iconPath = path.join(__dirname, "..", "..", "electron", "icons", "icon.png");
   return iconPath;
 }
 
