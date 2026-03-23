@@ -2,25 +2,24 @@ import { marked, type Tokens } from "marked";
 
 /**
  * Configure marked globally:
- * - External links open in a new tab / Electron's default browser
- * - Relative links (starting with / or #) stay in-app
- * - Image tags get proper loading attributes
+ * - External links (http/https) open in a new tab with styling
+ * - Relative links stay in-app
  */
-const renderer = new marked.Renderer();
+marked.use({
+  renderer: {
+    link({ href, title, tokens }: Tokens.Link) {
+      // Render inner text from tokens
+      const text = this.parser.parseInline(tokens);
+      const titleAttr = title ? ` title="${title}"` : "";
 
-const originalLink = renderer.link.bind(renderer);
-renderer.link = function (token: Tokens.Link) {
-  const html = originalLink(token);
-  // If it's an absolute URL (http/https), open externally
-  if (token.href && /^https?:\/\//.test(token.href)) {
-    return html
-      .replace("<a ", '<a target="_blank" rel="noopener noreferrer" ')
-      // Style external links so they look clickable
-      .replace("<a ", '<a class="text-primary underline underline-offset-2" ');
-  }
-  return html;
-};
-
-marked.use({ renderer });
+      if (href && /^https?:\/\//.test(href)) {
+        // External link — open in new tab with accent styling
+        return `<a href="${href}"${titleAttr} target="_blank" rel="noopener noreferrer" class="text-primary underline underline-offset-2">${text}</a>`;
+      }
+      // Internal / relative link
+      return `<a href="${href}"${titleAttr}>${text}</a>`;
+    },
+  },
+});
 
 export { marked };
