@@ -63,7 +63,7 @@ import {
 } from "lucide-react";
 import { ContextChat, type ContextItem } from "@/components/context-chat";
 import { ResizeHandle, useResizablePanel } from "@/components/resize-handle";
-import { marked } from "marked";
+import { marked } from "@/lib/marked-config";
 import { useToast } from "@/hooks/use-toast";
 
 interface Note {
@@ -160,11 +160,15 @@ function MarkdownToolbar({
 function NoteListItem({
   note,
   isSelected,
+  isInContext,
   onSelect,
+  onToggleContext,
 }: {
   note: Note;
   isSelected: boolean;
+  isInContext: boolean;
   onSelect: () => void;
+  onToggleContext: () => void;
 }) {
   const previewText = useMemo(() => {
     return note.content
@@ -188,17 +192,28 @@ function NoteListItem({
 
   return (
     <button
-      onClick={onSelect}
+      onClick={(e) => {
+        if (e.ctrlKey || e.metaKey) {
+          e.preventDefault();
+          onToggleContext();
+        } else {
+          onSelect();
+        }
+      }}
       className={`w-full text-left p-3 rounded-lg transition-colors ${
         isSelected
           ? "bg-primary/8 border border-primary/15"
+          : isInContext
+          ? "bg-primary/5 border border-primary/10"
           : "hover:bg-muted/40 border border-transparent"
       }`}
       data-testid={`note-item-${note.id}`}
+      title={isInContext ? "Ctrl+Click to remove from context" : "Ctrl+Click to add to AI context"}
     >
       <div className="flex items-start gap-2">
         <div className="flex-1 min-w-0">
           <div className="flex items-center gap-1.5 mb-0.5">
+            {isInContext && <MessageSquare className="w-2.5 h-2.5 text-primary shrink-0" />}
             {note.pinned && <Pin className="w-2.5 h-2.5 text-primary shrink-0" />}
             <span className="text-[13px] font-medium truncate text-foreground">{note.title}</span>
           </div>
@@ -247,6 +262,7 @@ export default function NotesPage() {
   const [newFolder, setNewFolder] = useState("/");
   const [chatOpen, setChatOpen] = useState(true);
   const [viewMode, setViewMode] = useState<"edit" | "preview">("edit");
+  const [contextNoteIds, setContextNoteIds] = useState<Set<string>>(new Set());
   const fileInputRef = useRef<HTMLInputElement>(null);
   const dumpFileRef = useRef<HTMLInputElement>(null);
   const editTextareaRef = useRef<HTMLTextAreaElement>(null);
@@ -383,6 +399,54 @@ export default function NotesPage() {
     setEditContent(note.content);
   };
 
+  const toggleNoteContext = useCallback((noteId: string) => {
+    setContextNoteIds(prev => {
+      const next = new Set(prev);
+      if (next.has(noteId)) next.delete(noteId);
+      else next.add(noteId);
+      return next;
+    });
+  }, []);
+
+  const handleAddContext = useCallback((item: ContextItem) => {
+    if (item.id) {
+      setContextNoteIds(prev => new Set(prev).add(item.id!));
+    }
+  }, []);
+
+  const handleRemoveContext = useCallback((id: string) => {
+    setContextNoteIds(prev => {
+      const next = new Set(prev);
+      next.delete(id);
+      return next;
+    });
+  }, []);
+
+  // Build the chat context: all explicitly added notes + the selected note
+  const chatContext = useMemo(() => {
+    const ids = new Set(contextNoteIds);
+    if (selectedNote) ids.add(selectedNote.id);
+    return notes
+      .filter(n => ids.has(n.id))
+      .map(n => ({
+        type: "note" as const,
+        title: n.title,
+        content: n.content,
+        id: n.id,
+      }));
+  }, [contextNoteIds, selectedNote, notes]);
+
+  // All notes as available items for @mention
+  const availableItems = useMemo(() =>
+    notes.map(n => ({
+      type: "note" as const,
+      title: n.title,
+      content: n.content,
+      id: n.id,
+    })),
+    [notes]
+  );
+
   return (
     <div className="flex-1 flex flex-col h-full">
       {/* Header */}
@@ -461,7 +525,9 @@ export default function NotesPage() {
                   key={note.id}
                   note={note}
                   isSelected={selectedNote?.id === note.id}
+                  isInContext={contextNoteIds.has(note.id)}
                   onSelect={() => selectNote(note)}
+                  onToggleContext={() => toggleNoteContext(note.id)}
                 />
               ))}
             </div>
@@ -657,13 +723,17 @@ export default function NotesPage() {
           open={chatOpen}
           onClose={() => setChatOpen(false)}
           width={chatPanel.width}
-          context={selectedNote ? [{
-            type: "note" as const,
-            title: selectedNote.title,
-            content: selectedNote.content,
-            id: selectedNote.id,
-          }] : []}
-          placeholder={selectedNote ? `Ask about "${selectedNote.title}"...` : "Select a note first..."}
+          context={chatContext}
+          availableItems={availableItems}
+          onAddContext={handleAddContext}
+          onRemoveContext={handleRemoveContext}
+          placeholder={
+            chatContext.length > 1
+              ? `${chatContext.length} notes in context — ask anything...`
+              : chatContext.length === 1
+              ? `Ask about "${chatContext[0].title}"...`
+              : "Select a note or type @ to add..."
+          }
         />
       </div>
 

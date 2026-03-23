@@ -62,7 +62,7 @@ import {
 import { ContextChat, type ContextItem } from "@/components/context-chat";
 import { ResizeHandle, useResizablePanel } from "@/components/resize-handle";
 import { useToast } from "@/hooks/use-toast";
-import { marked } from "marked";
+import { marked } from "@/lib/marked-config";
 import {
   DndContext,
   DragOverlay,

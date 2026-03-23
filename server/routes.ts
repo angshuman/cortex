@@ -141,12 +141,13 @@ export function registerRoutes(server: Server, app: Express) {
     const store = getVaultStorage(req);
     const title = req.body.title || `Dump ${new Date().toLocaleString()}`;
     let content = req.body.content || "";
-    const note = store.createNote({ title, content, folder: "/inbox", tags: ["dump"] });
+    let note = store.createNote({ title, content, folder: "/inbox", tags: ["dump"] });
     if (req.file) {
       const filename = `${Date.now()}-${req.file.originalname}`;
       const url = store.saveNoteAsset(note.id, filename, req.file.buffer);
       content += `\n\n![${req.file.originalname}](${url})`;
-      store.updateNote(note.id, { content, attachments: [url] });
+      const updated = store.updateNote(note.id, { content, attachments: [url] });
+      if (updated) note = updated;
     }
     res.status(201).json(note);
   });

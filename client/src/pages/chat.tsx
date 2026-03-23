@@ -23,7 +23,7 @@ import {
   X,
   Paperclip,
 } from "lucide-react";
-import { marked } from "marked";
+import { marked } from "@/lib/marked-config";
 import { useImagePaste } from "@/hooks/use-image-paste";
 
 interface ChatEvent {

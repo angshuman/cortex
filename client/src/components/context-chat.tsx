@@ -20,7 +20,7 @@ import {
   CheckSquare,
   Paperclip,
 } from "lucide-react";
-import { marked } from "marked";
+import { marked } from "@/lib/marked-config";
 import { useImagePaste } from "@/hooks/use-image-paste";
 
 interface ChatEvent {
@@ -46,14 +46,23 @@ interface ContextChatProps {
   /** Dynamic width in px — if undefined, defaults to 350 */
   width?: number;
   style?: React.CSSProperties;
+  /** Callback to remove a context item by id */
+  onRemoveContext?: (id: string) => void;
+  /** All available items for @mention autocomplete */
+  availableItems?: ContextItem[];
+  /** Callback when user selects an item from @mention */
+  onAddContext?: (item: ContextItem) => void;
 }
 
-export function ContextChat({ context, open, onClose, placeholder, width, style }: ContextChatProps) {
+export function ContextChat({ context, open, onClose, placeholder, width, style, onRemoveContext, availableItems, onAddContext }: ContextChatProps) {
   const [events, setEvents] = useState<ChatEvent[]>([]);
   const [input, setInput] = useState("");
   const [status, setStatus] = useState<"idle" | "thinking">("idle");
   const [sessionId, setSessionId] = useState<string | null>(null);
   const [expandedTools, setExpandedTools] = useState<Set<string>>(new Set());
+  const [mentionQuery, setMentionQuery] = useState<string | null>(null);
+  const [mentionIndex, setMentionIndex] = useState(0);
+  const mentionRef = useRef<HTMLDivElement>(null);
   const wsRef = useRef<WebSocket | null>(null);
   const pendingMessageRef = useRef<string | null>(null);
   const scrollRef = useRef<HTMLDivElement>(null);
@@ -144,6 +153,20 @@ export function ContextChat({ context, open, onClose, placeholder, width, style 
     if (open) setTimeout(() => inputRef.current?.focus(), 100);
   }, [open]);
 
+  // Compute filtered @mention suggestions
+  const contextIds = new Set(context.map(c => c.id));
+  const mentionSuggestions = (availableItems || []).filter(item => {
+    if (contextIds.has(item.id)) return false;
+    if (mentionQuery === null) return false;
+    if (mentionQuery === "") return true;
+    return item.title.toLowerCase().includes(mentionQuery.toLowerCase());
+  }).slice(0, 8);
+
+  // Reset mention index when suggestions change
+  useEffect(() => {
+    setMentionIndex(0);
+  }, [mentionQuery]);
+
   const handleSend = useCallback(async () => {
     const msg = input.trim();
     const images = uploadedImages.length > 0 ? uploadedImages : undefined;
@@ -184,7 +207,61 @@ export function ContextChat({ context, open, onClose, placeholder, width, style 
     }
   }, [input, sessionId, status, context, vaultId, vaultParam, uploadedImages, isUploading, clearImages]);
 
+  const handleInputChange = (e: React.ChangeEvent<HTMLTextAreaElement>) => {
+    const val = e.target.value;
+    setInput(val);
+    // Detect @mention
+    const cursorPos = e.target.selectionStart;
+    const textBefore = val.slice(0, cursorPos);
+    const atMatch = textBefore.match(/@([^@]*)$/);
+    if (atMatch && availableItems && availableItems.length > 0) {
+      setMentionQuery(atMatch[1]);
+    } else {
+      setMentionQuery(null);
+    }
+  };
+
+  const selectMention = useCallback((item: ContextItem) => {
+    // Remove the @query text from input
+    const ta = inputRef.current;
+    if (ta) {
+      const cursorPos = ta.selectionStart;
+      const textBefore = input.slice(0, cursorPos);
+      const atIdx = textBefore.lastIndexOf("@");
+      if (atIdx >= 0) {
+        const newInput = input.slice(0, atIdx) + input.slice(cursorPos);
+        setInput(newInput);
+      }
+    }
+    setMentionQuery(null);
+    onAddContext?.(item);
+    setTimeout(() => inputRef.current?.focus(), 10);
+  }, [input, onAddContext]);
+
   const handleKeyDown = (e: React.KeyboardEvent) => {
+    // Handle @mention navigation
+    if (mentionQuery !== null && mentionSuggestions.length > 0) {
+      if (e.key === "ArrowDown") {
+        e.preventDefault();
+        setMentionIndex(i => (i + 1) % mentionSuggestions.length);
+        return;
+      }
+      if (e.key === "ArrowUp") {
+        e.preventDefault();
+        setMentionIndex(i => (i - 1 + mentionSuggestions.length) % mentionSuggestions.length);
+        return;
+      }
+      if (e.key === "Enter") {
+        e.preventDefault();
+        selectMention(mentionSuggestions[mentionIndex]);
+        return;
+      }
+      if (e.key === "Escape") {
+        e.preventDefault();
+        setMentionQuery(null);
+        return;
+      }
+    }
     if (e.key === "Enter" && !e.shiftKey) {
       e.preventDefault();
       handleSend();
@@ -331,9 +408,18 @@ export function ContextChat({ context, open, onClose, placeholder, width, style 
       {context.length > 0 && (
         <div className="px-3 py-2 border-b border-border/50 flex flex-wrap gap-1">
           {context.map((item, i) => (
-            <Badge key={i} variant="secondary" className="text-[9px] px-1.5 py-0 h-4 gap-1">
+            <Badge key={item.id || i} variant="secondary" className="text-[9px] px-1.5 py-0 h-4 gap-1 group/badge">
               {item.type === "note" ? <FileText className="w-2.5 h-2.5" /> : <CheckSquare className="w-2.5 h-2.5" />}
-              <span className="truncate max-w-[180px] inline-block align-bottom" title={item.title}>{item.title}</span>
+              <span className="truncate max-w-[150px] inline-block align-bottom" title={item.title}>{item.title}</span>
+              {onRemoveContext && item.id && (
+                <button
+                  onClick={(e) => { e.stopPropagation(); onRemoveContext(item.id!); }}
+                  className="ml-0.5 opacity-0 group-hover/badge:opacity-100 transition-opacity hover:text-destructive"
+                  title="Remove from context"
+                >
+                  <X className="w-2.5 h-2.5" />
+                </button>
+              )}
             </Badge>
           ))}
         </div>
@@ -421,17 +507,40 @@ export function ContextChat({ context, open, onClose, placeholder, width, style 
           >
             <Paperclip className="w-3 h-3" />
           </Button>
-          <Textarea
-            ref={inputRef}
-            value={input}
-            onChange={(e) => setInput(e.target.value)}
-            onKeyDown={handleKeyDown}
-            onPaste={handlePaste}
-            placeholder={placeholder || "Ask anything..."}
-            className="min-h-[24px] max-h-[72px] resize-none border-0 bg-transparent focus-visible:ring-0 focus-visible:ring-offset-0 text-xs p-0 leading-relaxed"
-            rows={1}
-            data-testid="input-context-chat"
-          />
+          <div className="flex-1 relative">
+            {/* @mention dropdown */}
+            {mentionQuery !== null && mentionSuggestions.length > 0 && (
+              <div
+                ref={mentionRef}
+                className="absolute bottom-full left-0 right-0 mb-1 bg-popover border border-border rounded-lg shadow-lg overflow-hidden z-50 max-h-48 overflow-y-auto"
+              >
+                {mentionSuggestions.map((item, i) => (
+                  <button
+                    key={item.id || i}
+                    className={`w-full text-left px-3 py-1.5 text-xs flex items-center gap-2 transition-colors ${
+                      i === mentionIndex ? "bg-primary/10 text-foreground" : "text-muted-foreground hover:bg-muted/50"
+                    }`}
+                    onMouseDown={(e) => { e.preventDefault(); selectMention(item); }}
+                    onMouseEnter={() => setMentionIndex(i)}
+                  >
+                    {item.type === "note" ? <FileText className="w-3 h-3 shrink-0" /> : <CheckSquare className="w-3 h-3 shrink-0" />}
+                    <span className="truncate">{item.title}</span>
+                  </button>
+                ))}
+              </div>
+            )}
+            <Textarea
+              ref={inputRef}
+              value={input}
+              onChange={handleInputChange}
+              onKeyDown={handleKeyDown}
+              onPaste={handlePaste}
+              placeholder={placeholder || (availableItems ? "Type @ to add notes..." : "Ask anything...")}
+              className="min-h-[24px] max-h-[72px] resize-none border-0 bg-transparent focus-visible:ring-0 focus-visible:ring-offset-0 text-xs p-0 leading-relaxed"
+              rows={1}
+              data-testid="input-context-chat"
+            />
+          </div>
           <Button
             size="icon"
             className="shrink-0 h-5 w-5 rounded"
