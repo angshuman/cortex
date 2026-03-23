@@ -319,11 +319,11 @@ export function ContextChat({ context, open, onClose, placeholder, width, style,
 
       case "thought":
         return (
-          <div key={event.id || idx} className="flex mb-1.5 gap-2 items-start">
-            <div className="flex-shrink-0 w-6 h-6 rounded-full bg-amber-500/10 flex items-center justify-center mt-0.5">
+          <div key={event.id || idx} className="flex mb-1.5 gap-2 items-center">
+            <div className="flex-shrink-0 w-6 h-6 rounded-full bg-amber-500/10 flex items-center justify-center">
               <Brain className="w-3 h-3 text-amber-500" />
             </div>
-            <p className="text-[10px] text-muted-foreground italic pt-1">{event.content}</p>
+            <p className="text-[10px] text-muted-foreground/70 italic leading-none">{event.content}</p>
           </div>
         );
 
@@ -333,7 +333,7 @@ export function ContextChat({ context, open, onClose, placeholder, width, style,
           const isExpanded = expandedTools.has(event.id || String(idx));
           return (
             <div key={event.id || idx} className="flex mb-1 gap-2 items-start">
-              <div className="flex-shrink-0 w-6 h-6 rounded-full bg-blue-500/10 flex items-center justify-center mt-0.5">
+              <div className="flex-shrink-0 w-6 h-6 rounded-full bg-blue-500/10 flex items-center justify-center">
                 <Wrench className="w-3 h-3 text-blue-500" />
               </div>
               <div className="flex-1 min-w-0">
@@ -358,7 +358,7 @@ export function ContextChat({ context, open, onClose, placeholder, width, style,
         const isExp = expandedTools.has(event.id || String(idx));
         return (
           <div key={event.id || idx} className="flex mb-1.5 gap-2 items-start">
-            <div className="w-6" />
+            <div className="flex-shrink-0 w-6" />
             <div className="flex-1 min-w-0">
               <button
                 onClick={() => toggleToolExpand(event.id || String(idx))}
@@ -378,11 +378,11 @@ export function ContextChat({ context, open, onClose, placeholder, width, style,
 
       case "error":
         return (
-          <div key={event.id || idx} className="flex mb-2 gap-2 items-start">
-            <div className="flex-shrink-0 w-6 h-6 rounded-full bg-destructive/10 flex items-center justify-center mt-0.5">
+          <div key={event.id || idx} className="flex mb-2 gap-2 items-center">
+            <div className="flex-shrink-0 w-6 h-6 rounded-full bg-destructive/10 flex items-center justify-center">
               <AlertCircle className="w-3 h-3 text-destructive" />
             </div>
-            <p className="text-[10px] text-destructive pt-1">{event.content}</p>
+            <p className="text-[10px] text-destructive leading-none">{event.content}</p>
           </div>
         );
 
@@ -445,10 +445,10 @@ export function ContextChat({ context, open, onClose, placeholder, width, style,
         {events.map((e, i) => renderEvent(e, i))}
         {status === "thinking" && (
           <div className="flex mb-2 gap-2 items-center">
-            <div className="flex-shrink-0 w-5 h-5 rounded-full bg-primary/10 flex items-center justify-center">
+            <div className="flex-shrink-0 w-6 h-6 rounded-full bg-primary/10 flex items-center justify-center">
               <Loader2 className="w-3 h-3 text-primary animate-spin" />
             </div>
-            <span className="text-[10px] text-muted-foreground/60">Thinking...</span>
+            <span className="text-[10px] text-muted-foreground/60 leading-none">Thinking...</span>
           </div>
         )}
       </div>
@@ -484,7 +484,7 @@ export function ContextChat({ context, open, onClose, placeholder, width, style,
             ))}
           </div>
         )}
-        <div className="relative flex items-end gap-1 bg-muted/40 rounded-lg border border-border/40 px-2 py-1.5 focus-within:border-primary/40 transition-colors input-glow">
+        <div className="relative flex items-center gap-1 bg-muted/40 rounded-lg border border-border/40 px-2 py-1.5 focus-within:border-primary/40 transition-colors input-glow">
           <input
             ref={fileInputRef}
             type="file"
@@ -536,7 +536,7 @@ export function ContextChat({ context, open, onClose, placeholder, width, style,
               onKeyDown={handleKeyDown}
               onPaste={handlePaste}
               placeholder={placeholder || (availableItems ? "Type @ to add notes..." : "Ask anything...")}
-              className="min-h-[24px] max-h-[72px] resize-none border-0 bg-transparent focus-visible:ring-0 focus-visible:ring-offset-0 text-xs p-0 leading-relaxed"
+              className="min-h-[28px] max-h-[80px] resize-none border-0 bg-transparent focus-visible:ring-0 focus-visible:ring-offset-0 text-xs p-0 py-0.5 leading-relaxed"
               rows={1}
               data-testid="input-context-chat"
             />
