@@ -649,6 +649,23 @@ export class Agent {
       contentBlocks.push({ type: "text", text: `[Image URLs for reference — use these when creating notes]\n${urlList}` });
     }
 
+    // Attach images from context notes so the LLM can actually see them
+    if (this.context.length > 0) {
+      const imgRegex = /!\[[^\]]*\]\((\/api\/(?:notes\/[^/]+\/assets|chat\/assets)\/[^)]+)\)/g;
+      for (const item of this.context) {
+        let match;
+        while ((match = imgRegex.exec(item.content)) !== null) {
+          const imgUrl = match[1];
+          const ext = imgUrl.split(".").pop()?.toLowerCase() || "png";
+          const mimeMap: Record<string, string> = {
+            png: "image/png", jpg: "image/jpeg", jpeg: "image/jpeg",
+            gif: "image/gif", webp: "image/webp",
+          };
+          contentBlocks.push({ type: "image", url: imgUrl, mediaType: mimeMap[ext] || "image/png" });
+        }
+      }
+    }
+
     // If user sent only image(s) with no text, inject auto-analysis instruction
     const effectiveMessage = userMessage || "The user pasted this image without any text. Analyze the image thoroughly: describe what you see, extract any text/data, identify key information, and then automatically save it as a note with a descriptive title. Include the image in the note content using the image URLs provided. Add relevant tags based on the content (e.g. screenshot, diagram, photo, receipt, code, whiteboard, etc). Put it in the /inbox folder.";
     contentBlocks.push({ type: "text", text: effectiveMessage });
@@ -672,7 +689,7 @@ export class Agent {
                        `Context: "${item.title}"`;
         return `### ${header}\n${item.content}`;
       }).join("\n\n");
-      systemPrompt += `\n\n## Active Context\nThe user is viewing the following items. You already have their full content below — do NOT call read_note unless you need to refresh or read a different note. Reference them directly when relevant.\n\n${contextBlock}`;
+      systemPrompt += `\n\n## Active Context\nThe user is viewing the following items. You already have their full content below — do NOT call read_note unless you need to refresh or read a different note. If any notes contain images, those images are attached as visual content in this conversation so you can see and analyze them. Reference context items directly when relevant.\n\n${contextBlock}`;
     }
 
     const tools = getToolDefinitions(this.storage);
