@@ -19,6 +19,7 @@ import {
   ChevronDown,
   ChevronRight,
   Plus,
+  ArrowUp,
   Image as ImageIcon,
   X,
   Paperclip,
@@ -424,7 +425,7 @@ export default function ChatPage() {
               ))}
             </div>
           )}
-          <div className="relative flex items-end gap-2 bg-muted/50 rounded-xl border border-border/50 p-2 focus-within:border-primary/50 transition-colors">
+          <div className="relative bg-muted/30 rounded-2xl border border-border/40 transition-colors">
             <input
               ref={fileInputRef}
               type="file"
@@ -437,16 +438,6 @@ export default function ChatPage() {
                 e.target.value = "";
               }}
             />
-            <Button
-              variant="ghost"
-              size="icon"
-              className="shrink-0 h-8 w-8 rounded-lg text-muted-foreground hover:text-foreground"
-              onClick={() => fileInputRef.current?.click()}
-              data-testid="button-attach-image"
-              title="Attach image"
-            >
-              <Paperclip className="w-3.5 h-3.5" />
-            </Button>
             <Textarea
               ref={inputRef}
               value={input}
@@ -454,19 +445,31 @@ export default function ChatPage() {
               onKeyDown={handleKeyDown}
               onPaste={handlePaste}
               placeholder={isDragging ? "Drop image here..." : "Ask anything... (paste or drop images)"}
-              className="min-h-[40px] max-h-[160px] resize-none border-0 bg-transparent focus-visible:ring-0 focus-visible:ring-offset-0 text-sm p-1"
+              className="min-h-[44px] max-h-[200px] resize-none border-0 bg-transparent focus-visible:ring-0 focus-visible:ring-offset-0 text-sm px-4 pt-3 pb-0"
               rows={1}
               data-testid="input-chat"
             />
-            <Button
-              size="icon"
-              className="shrink-0 h-8 w-8 rounded-lg"
-              onClick={handleSend}
-              disabled={(!input.trim() && !hasImages) || status === "thinking" || isUploading}
-              data-testid="button-send"
-            >
-              <Send className="w-3.5 h-3.5" />
-            </Button>
+            <div className="flex items-center justify-between px-3 py-2">
+              <Button
+                variant="ghost"
+                size="icon"
+                className="h-7 w-7 rounded-lg text-muted-foreground/50 hover:text-foreground"
+                onClick={() => fileInputRef.current?.click()}
+                data-testid="button-attach-image"
+                title="Attach image"
+              >
+                <Plus className="w-4 h-4" />
+              </Button>
+              <Button
+                size="icon"
+                className="h-7 w-7 rounded-full bg-foreground/80 hover:bg-foreground text-background disabled:opacity-30 disabled:bg-muted-foreground/30"
+                onClick={handleSend}
+                disabled={(!input.trim() && !hasImages) || status === "thinking" || isUploading}
+                data-testid="button-send"
+              >
+                <ArrowUp className="w-3.5 h-3.5" />
+              </Button>
+            </div>
           </div>
           <p className="text-[10px] text-muted-foreground/50 mt-1.5 text-center">
             Cortex can make mistakes. Paste or drop images to analyze them.

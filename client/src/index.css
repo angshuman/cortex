@@ -200,10 +200,7 @@
   font-family: var(--font-mono);
 }
 
-/* Focus-within glow for input areas */
-.input-glow:focus-within {
-  box-shadow: 0 0 0 1px hsl(var(--primary) / 0.2), 0 0 12px -2px hsl(var(--primary) / 0.1);
-}
+/* Focus-within glow for input areas — removed for cleaner look */
 
 /* Better card hover effect */
 .card-hover {

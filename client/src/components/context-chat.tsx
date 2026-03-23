@@ -19,6 +19,8 @@ import {
   FileText,
   CheckSquare,
   Paperclip,
+  Plus,
+  ArrowUp,
 } from "lucide-react";
 import { marked } from "@/lib/marked-config";
 import { useImagePaste } from "@/hooks/use-image-paste";
@@ -455,7 +457,7 @@ export function ContextChat({ context, open, onClose, placeholder, width, style,
 
       {/* Input */}
       <div
-        className="border-t border-border/50 p-2.5 shrink-0"
+        className="border-t border-border/50 p-2 shrink-0"
         onDrop={handleDrop}
         onDragOver={handleDragOver}
       >
@@ -484,7 +486,7 @@ export function ContextChat({ context, open, onClose, placeholder, width, style,
             ))}
           </div>
         )}
-        <div className="relative flex items-center gap-1 bg-muted/40 rounded-lg border border-border/40 px-2 py-1.5 focus-within:border-primary/40 transition-colors input-glow">
+        <div className="relative bg-muted/30 rounded-xl border border-border/40 transition-colors">
           <input
             ref={fileInputRef}
             type="file"
@@ -497,17 +499,7 @@ export function ContextChat({ context, open, onClose, placeholder, width, style,
               e.target.value = "";
             }}
           />
-          <Button
-            variant="ghost"
-            size="icon"
-            className="shrink-0 h-5 w-5 rounded text-muted-foreground/50 hover:text-foreground"
-            onClick={() => fileInputRef.current?.click()}
-            data-testid="button-context-attach"
-            title="Attach image"
-          >
-            <Paperclip className="w-3 h-3" />
-          </Button>
-          <div className="flex-1 relative">
+          <div className="relative">
             {/* @mention dropdown */}
             {mentionQuery !== null && mentionSuggestions.length > 0 && (
               <div
@@ -536,20 +528,32 @@ export function ContextChat({ context, open, onClose, placeholder, width, style,
               onKeyDown={handleKeyDown}
               onPaste={handlePaste}
               placeholder={placeholder || (availableItems ? "Type @ to add notes..." : "Ask anything...")}
-              className="min-h-[28px] max-h-[80px] resize-none border-0 bg-transparent focus-visible:ring-0 focus-visible:ring-offset-0 text-xs p-0 py-0.5 leading-relaxed"
+              className="min-h-[32px] max-h-[100px] resize-none border-0 bg-transparent focus-visible:ring-0 focus-visible:ring-offset-0 text-xs px-3 pt-2.5 pb-0 leading-relaxed"
               rows={1}
               data-testid="input-context-chat"
             />
           </div>
-          <Button
-            size="icon"
-            className="shrink-0 h-5 w-5 rounded"
-            onClick={handleSend}
-            disabled={(!input.trim() && !hasImages) || status === "thinking" || isUploading}
-            data-testid="button-context-send"
-          >
-            <Send className="w-2.5 h-2.5" />
-          </Button>
+          <div className="flex items-center justify-between px-2 py-1.5">
+            <Button
+              variant="ghost"
+              size="icon"
+              className="h-5 w-5 rounded text-muted-foreground/40 hover:text-foreground"
+              onClick={() => fileInputRef.current?.click()}
+              data-testid="button-context-attach"
+              title="Attach image"
+            >
+              <Plus className="w-3.5 h-3.5" />
+            </Button>
+            <Button
+              size="icon"
+              className="h-5 w-5 rounded-full bg-foreground/80 hover:bg-foreground text-background disabled:opacity-30 disabled:bg-muted-foreground/30"
+              onClick={handleSend}
+              disabled={(!input.trim() && !hasImages) || status === "thinking" || isUploading}
+              data-testid="button-context-send"
+            >
+              <ArrowUp className="w-2.5 h-2.5" />
+            </Button>
+          </div>
         </div>
       </div>
     </div>
