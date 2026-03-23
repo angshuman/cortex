@@ -63,6 +63,7 @@ import {
 } from "lucide-react";
 import { ContextChat, type ContextItem } from "@/components/context-chat";
 import { ResizeHandle, useResizablePanel } from "@/components/resize-handle";
+import { ImageLightbox, useImageLightbox } from "@/components/image-lightbox";
 import { marked } from "@/lib/marked-config";
 import { useToast } from "@/hooks/use-toast";
 
@@ -269,6 +270,7 @@ export default function NotesPage() {
   const queryClient = useQueryClient();
   const { toast } = useToast();
   const { vaultParam, vaultId } = useVault();
+  const { lightbox, handleContainerClick, closeLightbox } = useImageLightbox();
 
   const noteList = useResizablePanel({ defaultWidth: 280, minWidth: 200, maxWidth: 420, storageKey: "cortex-notes-list-width" });
   const chatPanel = useResizablePanel({ defaultWidth: 350, minWidth: 280, maxWidth: 500, storageKey: "cortex-notes-chat-width", reverse: true });
@@ -662,8 +664,9 @@ export default function NotesPage() {
                     ) : (
                       <div className="p-4">
                         <div
-                          className="prose prose-sm dark:prose-invert max-w-none [&_img]:rounded-lg [&_img]:max-w-[600px] [&_p]:mb-3 [&_ul]:mb-3 [&_ol]:mb-3 [&_pre]:bg-muted [&_pre]:p-3 [&_pre]:rounded-lg [&_code]:text-xs [&_h1]:text-lg [&_h2]:text-base [&_h3]:text-sm"
+                          className="prose prose-sm dark:prose-invert max-w-none [&_img]:rounded-lg [&_img]:max-w-[600px] [&_img]:cursor-pointer [&_img]:hover:opacity-90 [&_img]:transition-opacity [&_p]:mb-3 [&_ul]:mb-3 [&_ol]:mb-3 [&_pre]:bg-muted [&_pre]:p-3 [&_pre]:rounded-lg [&_code]:text-xs [&_h1]:text-lg [&_h2]:text-base [&_h3]:text-sm"
                           dangerouslySetInnerHTML={{ __html: marked.parse(editContent) as string }}
+                          onClick={handleContainerClick}
                         />
                       </div>
                     )}
@@ -704,8 +707,9 @@ export default function NotesPage() {
                     </div>
                     {selectedNote.content ? (
                       <div
-                        className="prose prose-sm dark:prose-invert max-w-none [&_img]:rounded-lg [&_img]:max-w-[600px] [&_p]:mb-3 [&_ul]:mb-3 [&_ol]:mb-3 [&_pre]:bg-muted [&_pre]:p-3 [&_pre]:rounded-lg [&_code]:text-xs [&_h1]:text-lg [&_h2]:text-base [&_h3]:text-sm"
+                        className="prose prose-sm dark:prose-invert max-w-none [&_img]:rounded-lg [&_img]:max-w-[600px] [&_img]:cursor-pointer [&_img]:hover:opacity-90 [&_img]:transition-opacity [&_p]:mb-3 [&_ul]:mb-3 [&_ol]:mb-3 [&_pre]:bg-muted [&_pre]:p-3 [&_pre]:rounded-lg [&_code]:text-xs [&_h1]:text-lg [&_h2]:text-base [&_h3]:text-sm"
                         dangerouslySetInnerHTML={{ __html: marked.parse(selectedNote.content) as string }}
+                        onClick={handleContainerClick}
                       />
                     ) : (
                       <p className="text-sm text-muted-foreground/40 italic">Empty note — click Edit to add content</p>
@@ -785,6 +789,16 @@ export default function NotesPage() {
           </div>
         </SheetContent>
       </Sheet>
+
+      {/* Image lightbox */}
+      {lightbox && (
+        <ImageLightbox
+          src={lightbox.src}
+          alt={lightbox.alt}
+          open={!!lightbox}
+          onClose={closeLightbox}
+        />
+      )}
     </div>
   );
 }

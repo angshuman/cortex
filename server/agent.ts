@@ -666,12 +666,13 @@ export class Agent {
     // Inject context items into system prompt
     if (this.context.length > 0) {
       const contextBlock = this.context.map((item, i) => {
-        const header = item.type === "note" ? `Note: "${item.title}"` :
-                       item.type === "task" ? `Task: "${item.title}"` :
+        const idStr = item.id ? ` (id: ${item.id})` : "";
+        const header = item.type === "note" ? `Note: "${item.title}"${idStr}` :
+                       item.type === "task" ? `Task: "${item.title}"${idStr}` :
                        `Context: "${item.title}"`;
         return `### ${header}\n${item.content}`;
       }).join("\n\n");
-      systemPrompt += `\n\n## Active Context\nThe user is viewing the following items. Reference them directly when relevant.\n\n${contextBlock}`;
+      systemPrompt += `\n\n## Active Context\nThe user is viewing the following items. You already have their full content below — do NOT call read_note unless you need to refresh or read a different note. Reference them directly when relevant.\n\n${contextBlock}`;
     }
 
     const tools = getToolDefinitions(this.storage);
