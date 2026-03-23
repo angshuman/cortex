@@ -3,6 +3,7 @@ import { useLocation, Link } from "wouter";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { apiRequest, withVault } from "@/lib/queryClient";
 import { useVault, type Vault } from "@/hooks/use-vault";
+import cortexIcon from "@/assets/cortex-icon.png";
 import {
   Sidebar,
   SidebarContent,
@@ -246,19 +247,8 @@ export function AppSidebar() {
       <Sidebar collapsible="icon" className="border-r border-border/50">
         <SidebarHeader className="p-3 pb-2">
           <div className="flex items-center gap-2">
-            <div className="flex items-center justify-center w-7 h-7 rounded-lg bg-muted/50 overflow-hidden">
-              <svg viewBox="0 0 512 512" className="w-7 h-7">
-                <rect width="512" height="512" rx="108" fill="currentColor" className="text-muted/80" />
-                <g fill="none" stroke="currentColor" strokeLinecap="round" strokeLinejoin="round" className="text-foreground">
-                  <path d="M 320,126 C 270,90 210,80 165,100 C 100,128 66,190 66,256 C 66,322 100,384 165,412 C 210,432 270,422 320,386" strokeWidth="36"/>
-                  <line x1="320" y1="126" x2="380" y2="126" strokeWidth="28"/>
-                  <line x1="345" y1="256" x2="405" y2="256" strokeWidth="28"/>
-                  <line x1="320" y1="386" x2="380" y2="386" strokeWidth="28"/>
-                </g>
-                <circle cx="388" cy="126" r="18" fill="currentColor" className="text-foreground" />
-                <circle cx="413" cy="256" r="18" fill="currentColor" className="text-foreground" />
-                <circle cx="388" cy="386" r="18" fill="currentColor" className="text-foreground" />
-              </svg>
+            <div className="flex items-center justify-center w-7 h-7 rounded-lg overflow-hidden">
+              <img src={cortexIcon} alt="Cortex" className="w-7 h-7" />
             </div>
             {!collapsed && (
               <span className="text-sm font-semibold tracking-tight">Cortex</span>
