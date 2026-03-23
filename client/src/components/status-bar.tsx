@@ -37,6 +37,22 @@ function formatTokens(n: number): string {
   return String(n);
 }
 
+// Approximate cost per 1M tokens (input, output) by provider
+const COST_PER_M: Record<string, { input: number; output: number }> = {
+  openai:    { input: 2.50, output: 10.00 },  // gpt-4o
+  anthropic: { input: 3.00, output: 15.00 },  // claude sonnet 4
+  grok:      { input: 3.00, output: 15.00 },  // grok-3
+  google:    { input: 0.10, output: 0.40 },   // gemini-2.0-flash
+};
+
+function estimateCost(provider: string, inputTokens: number, outputTokens: number): string {
+  const rates = COST_PER_M[provider];
+  if (!rates) return "";
+  const cost = (inputTokens / 1_000_000) * rates.input + (outputTokens / 1_000_000) * rates.output;
+  if (cost < 0.01) return "<$0.01";
+  return `~$${cost.toFixed(2)}`;
+}
+
 export function StatusBar() {
   const queryClient = useQueryClient();
   const { vaultParam } = useVault();
@@ -119,7 +135,14 @@ export function StatusBar() {
             onClick={() => resetStats.mutate()}
           >
             <Zap className="w-3 h-3" />
-            <span className="tabular-nums">{formatTokens(totalTokens)} tokens</span>
+            <span className="tabular-nums">
+              {formatTokens(totalTokens)} tokens
+              {totalTokens > 0 && provider !== "none" && (
+                <span className="ml-1 opacity-60">
+                  {estimateCost(provider, stats?.totalInputTokens || 0, stats?.totalOutputTokens || 0)}
+                </span>
+              )}
+            </span>
           </button>
         </TooltipTrigger>
         <TooltipContent side="top" className="text-xs">
@@ -127,6 +150,9 @@ export function StatusBar() {
             <div>Input: {formatTokens(stats?.totalInputTokens || 0)}</div>
             <div>Output: {formatTokens(stats?.totalOutputTokens || 0)}</div>
             <div>Requests: {stats?.totalRequests || 0}</div>
+            {totalTokens > 0 && provider !== "none" && (
+              <div className="font-medium">Est. cost: {estimateCost(provider, stats?.totalInputTokens || 0, stats?.totalOutputTokens || 0)}</div>
+            )}
             <div className="text-muted-foreground mt-1 flex items-center gap-1">
               <RotateCcw className="w-2.5 h-2.5" /> Click to reset
             </div>

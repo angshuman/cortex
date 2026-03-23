@@ -62,17 +62,7 @@ const navItems = [
   { title: "Settings", href: "/settings", icon: Settings },
 ];
 
-const VAULT_COLORS = [
-  "#6366f1", "#8b5cf6", "#ec4899", "#f43f5e",
-  "#f97316", "#eab308", "#22c55e", "#06b6d4",
-  "#3b82f6", "#64748b",
-];
 
-const VAULT_ICONS = [
-  "\ud83c\udfe0", "\ud83d\udcbc", "\ud83c\udf93", "\ud83d\udd2c",
-  "\ud83c\udfa8", "\ud83c\udfae", "\u2764\ufe0f", "\ud83d\udcc1",
-  "\ud83d\ude80", "\u2699\ufe0f",
-];
 
 // ============ Chat Session Grouping ============
 function getTimeGroup(dateStr: string): { key: string; label: string; order: number } {
@@ -169,8 +159,6 @@ export function AppSidebar() {
   const [showRenameDialog, setShowRenameDialog] = useState(false);
   const [showDeleteConfirm, setShowDeleteConfirm] = useState(false);
   const [dialogName, setDialogName] = useState("");
-  const [dialogIcon, setDialogIcon] = useState("\ud83d\udcc1");
-  const [dialogColor, setDialogColor] = useState("#6366f1");
   const [editingVault, setEditingVault] = useState<Vault | null>(null);
 
   const { data: sessions } = useQuery({
@@ -193,8 +181,8 @@ export function AppSidebar() {
     try {
       const res = await apiRequest("POST", "/api/vaults", {
         name: dialogName.trim(),
-        icon: dialogIcon,
-        color: dialogColor,
+        icon: dialogName.trim().charAt(0).toUpperCase(),
+        color: "#64748b",
       });
       const vault = await res.json();
       refetchVaults();
@@ -210,8 +198,8 @@ export function AppSidebar() {
     try {
       await apiRequest("PATCH", `/api/vaults/${editingVault.id}`, {
         name: dialogName.trim(),
-        icon: dialogIcon,
-        color: dialogColor,
+        icon: dialogName.trim().charAt(0).toUpperCase(),
+        color: "#64748b",
       });
       refetchVaults();
       setShowRenameDialog(false);
@@ -232,8 +220,6 @@ export function AppSidebar() {
   const openRename = (v: Vault) => {
     setEditingVault(v);
     setDialogName(v.name);
-    setDialogIcon(v.icon);
-    setDialogColor(v.color);
     setShowRenameDialog(true);
   };
 
@@ -266,7 +252,7 @@ export function AppSidebar() {
                     className="w-full flex items-center gap-2 px-2.5 py-1.5 rounded-lg border border-border/50 hover:bg-muted/50 transition-colors text-left"
                     data-testid="button-vault-switcher"
                   >
-                    <span className="text-base leading-none">{activeVault.icon}</span>
+                    <span className="w-5 h-5 rounded bg-muted/60 flex items-center justify-center text-[10px] font-semibold text-muted-foreground uppercase leading-none">{activeVault.name?.charAt(0) || "V"}</span>
                     <span className="text-xs font-medium flex-1 truncate">{activeVault.name}</span>
                     <ChevronDown className="w-3 h-3 text-muted-foreground shrink-0" />
                   </button>
@@ -280,7 +266,7 @@ export function AppSidebar() {
                       data-testid={`vault-item-${v.slug}`}
                     >
                       <div className="flex items-center gap-2 flex-1 min-w-0">
-                        <span className="text-sm">{v.icon}</span>
+                        <span className="w-5 h-5 rounded bg-muted/60 flex items-center justify-center text-[10px] font-semibold text-muted-foreground uppercase leading-none shrink-0">{v.name?.charAt(0) || "V"}</span>
                         <span className="text-xs truncate">{v.name}</span>
                         {v.id === activeVault.id && (
                           <span className="w-1.5 h-1.5 rounded-full bg-primary shrink-0" />
@@ -310,8 +296,6 @@ export function AppSidebar() {
                   <DropdownMenuItem
                     onClick={() => {
                       setDialogName("");
-                      setDialogIcon("\ud83d\udcc1");
-                      setDialogColor("#6366f1");
                       setShowCreateDialog(true);
                     }}
                     className="flex items-center gap-2"
@@ -333,7 +317,7 @@ export function AppSidebar() {
                 title={activeVault.name}
                 data-testid="button-vault-switcher-collapsed"
               >
-                {activeVault.icon}
+                <span className="text-xs font-semibold text-muted-foreground uppercase">{activeVault.name?.charAt(0) || "V"}</span>
               </button>
             </div>
           )}
@@ -416,33 +400,6 @@ export function AppSidebar() {
                 onKeyDown={e => { if (e.key === "Enter") handleCreateVault(); }}
               />
             </div>
-            <div>
-              <label className="text-xs text-muted-foreground mb-1.5 block">Icon</label>
-              <div className="flex flex-wrap gap-1.5">
-                {VAULT_ICONS.map(icon => (
-                  <button
-                    key={icon}
-                    className={`w-8 h-8 rounded-lg flex items-center justify-center text-lg hover:bg-muted/50 transition-colors ${dialogIcon === icon ? "bg-muted ring-2 ring-primary" : ""}`}
-                    onClick={() => setDialogIcon(icon)}
-                  >
-                    {icon}
-                  </button>
-                ))}
-              </div>
-            </div>
-            <div>
-              <label className="text-xs text-muted-foreground mb-1.5 block">Color</label>
-              <div className="flex flex-wrap gap-1.5">
-                {VAULT_COLORS.map(color => (
-                  <button
-                    key={color}
-                    className={`w-6 h-6 rounded-full transition-all ${dialogColor === color ? "ring-2 ring-offset-2 ring-offset-background ring-primary scale-110" : "hover:scale-110"}`}
-                    style={{ backgroundColor: color }}
-                    onClick={() => setDialogColor(color)}
-                  />
-                ))}
-              </div>
-            </div>
           </div>
           <DialogFooter>
             <Button variant="outline" size="sm" onClick={() => setShowCreateDialog(false)}>Cancel</Button>
@@ -471,33 +428,6 @@ export function AppSidebar() {
                 onKeyDown={e => { if (e.key === "Enter") handleRenameVault(); }}
               />
             </div>
-            <div>
-              <label className="text-xs text-muted-foreground mb-1.5 block">Icon</label>
-              <div className="flex flex-wrap gap-1.5">
-                {VAULT_ICONS.map(icon => (
-                  <button
-                    key={icon}
-                    className={`w-8 h-8 rounded-lg flex items-center justify-center text-lg hover:bg-muted/50 transition-colors ${dialogIcon === icon ? "bg-muted ring-2 ring-primary" : ""}`}
-                    onClick={() => setDialogIcon(icon)}
-                  >
-                    {icon}
-                  </button>
-                ))}
-              </div>
-            </div>
-            <div>
-              <label className="text-xs text-muted-foreground mb-1.5 block">Color</label>
-              <div className="flex flex-wrap gap-1.5">
-                {VAULT_COLORS.map(color => (
-                  <button
-                    key={color}
-                    className={`w-6 h-6 rounded-full transition-all ${dialogColor === color ? "ring-2 ring-offset-2 ring-offset-background ring-primary scale-110" : "hover:scale-110"}`}
-                    style={{ backgroundColor: color }}
-                    onClick={() => setDialogColor(color)}
-                  />
-                ))}
-              </div>
-            </div>
           </div>
           <DialogFooter>
             <Button variant="outline" size="sm" onClick={() => setShowRenameDialog(false)}>Cancel</Button>
@@ -515,7 +445,7 @@ export function AppSidebar() {
             <DialogTitle className="text-base">Delete Vault</DialogTitle>
           </DialogHeader>
           <p className="text-sm text-muted-foreground">
-            Are you sure you want to remove <span className="font-medium text-foreground">{editingVault?.icon} {editingVault?.name}</span>? The data folder will be kept on disk for safety.
+            Are you sure you want to remove <span className="font-medium text-foreground">{editingVault?.name}</span>? The data folder will be kept on disk for safety.
           </p>
           <DialogFooter>
             <Button variant="outline" size="sm" onClick={() => setShowDeleteConfirm(false)}>Cancel</Button>

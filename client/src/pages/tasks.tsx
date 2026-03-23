@@ -593,9 +593,8 @@ export default function TasksPage() {
 
   const createTask = useMutation({
     mutationFn: (data: any) => apiRequest("POST", withVault("/api/tasks", vaultParam), data).then(r => r.json()),
-    onSuccess: (task) => {
+    onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["/api/tasks"] });
-      setDetailTask(task);
       toast({ title: "Task created" });
     },
   });
