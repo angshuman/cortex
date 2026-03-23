@@ -26,7 +26,7 @@ win:
       arch:
         - x64
         - arm64
-  icon: electron/icons/icon.png
+  icon: electron/icons/icon.ico
 
 nsis:
   oneClick: false

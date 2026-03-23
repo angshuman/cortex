@@ -273,7 +273,7 @@ export default function NotesPage() {
   const { lightbox, handleContainerClick, closeLightbox } = useImageLightbox();
 
   const noteList = useResizablePanel({ defaultWidth: 280, minWidth: 200, maxWidth: 420, storageKey: "cortex-notes-list-width" });
-  const chatPanel = useResizablePanel({ defaultWidth: 350, minWidth: 280, maxWidth: 500, storageKey: "cortex-notes-chat-width", reverse: true });
+  const chatPanel = useResizablePanel({ defaultWidth: 420, minWidth: 280, maxWidth: 800, storageKey: "cortex-notes-chat-width", reverse: true });
 
   const { data: notes = [] } = useQuery<Note[]>({
     queryKey: ["/api/notes", vaultId],

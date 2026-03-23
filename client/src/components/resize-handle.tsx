@@ -45,7 +45,10 @@ export function useResizablePanel({
         const newWidth = reverse
           ? startWidth.current - delta
           : startWidth.current + delta;
-        const clamped = Math.max(minWidth, Math.min(maxWidth, newWidth));
+        // Clamp to the lesser of maxWidth or 50% of viewport
+        const viewportMax = Math.floor(window.innerWidth * 0.5);
+        const effectiveMax = Math.min(maxWidth, viewportMax);
+        const clamped = Math.max(minWidth, Math.min(effectiveMax, newWidth));
         setWidth(clamped);
       };
 

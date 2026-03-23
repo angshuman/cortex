@@ -567,7 +567,7 @@ function TaskDetailPanel({
 
 // ============ Main Tasks Page ============
 export default function TasksPage() {
-  const [view, setView] = useState<"list" | "kanban">("kanban");
+  const [view, setView] = useState<"list" | "kanban">("list");
   const [detailTask, setDetailTask] = useState<Task | null>(null);
   const [showNewTask, setShowNewTask] = useState(false);
   const [newTaskStatus, setNewTaskStatus] = useState("todo");
@@ -578,7 +578,7 @@ export default function TasksPage() {
   const [newParentId, setNewParentId] = useState<string>("");
   const [filterStatuses, setFilterStatuses] = useState<Set<string>>(new Set(DEFAULT_VISIBLE_STATUSES));
   const [chatOpen, setChatOpen] = useState(true);
-  const chatPanel = useResizablePanel({ defaultWidth: 350, minWidth: 280, maxWidth: 500, storageKey: "cortex-tasks-chat-width", reverse: true });
+  const chatPanel = useResizablePanel({ defaultWidth: 420, minWidth: 280, maxWidth: 800, storageKey: "cortex-tasks-chat-width", reverse: true });
   const [activeId, setActiveId] = useState<string | null>(null);
   const queryClient = useQueryClient();
   const { toast } = useToast();
