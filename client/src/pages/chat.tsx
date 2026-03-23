@@ -26,6 +26,7 @@ import {
 } from "lucide-react";
 import { marked } from "@/lib/marked-config";
 import { useImagePaste } from "@/hooks/use-image-paste";
+import { AttachMenu } from "@/components/attach-menu";
 
 interface ChatEvent {
   id: string;
@@ -450,16 +451,10 @@ export default function ChatPage() {
               data-testid="input-chat"
             />
             <div className="flex items-center justify-between px-3 py-2">
-              <Button
-                variant="ghost"
-                size="icon"
-                className="h-7 w-7 rounded-lg text-muted-foreground/50 hover:text-foreground"
-                onClick={() => fileInputRef.current?.click()}
-                data-testid="button-attach-image"
-                title="Attach image"
-              >
-                <Plus className="w-4 h-4" />
-              </Button>
+              <AttachMenu
+                onUploadFile={() => fileInputRef.current?.click()}
+                size="md"
+              />
               <Button
                 size="icon"
                 className="h-7 w-7 rounded-full bg-foreground/80 hover:bg-foreground text-background disabled:opacity-30 disabled:bg-muted-foreground/30"

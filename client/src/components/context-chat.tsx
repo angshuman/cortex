@@ -24,6 +24,7 @@ import {
 } from "lucide-react";
 import { marked } from "@/lib/marked-config";
 import { useImagePaste } from "@/hooks/use-image-paste";
+import { AttachMenu } from "@/components/attach-menu";
 
 interface ChatEvent {
   id: string;
@@ -534,16 +535,13 @@ export function ContextChat({ context, open, onClose, placeholder, width, style,
             />
           </div>
           <div className="flex items-center justify-between px-2 py-1.5">
-            <Button
-              variant="ghost"
-              size="icon"
-              className="h-5 w-5 rounded text-muted-foreground/40 hover:text-foreground"
-              onClick={() => fileInputRef.current?.click()}
-              data-testid="button-context-attach"
-              title="Attach image"
-            >
-              <Plus className="w-3.5 h-3.5" />
-            </Button>
+            <AttachMenu
+              onUploadFile={() => fileInputRef.current?.click()}
+              onAttachItem={onAddContext ? (item) => {
+                onAddContext({ type: item.type as "note" | "task", title: item.title, content: "", id: item.id });
+              } : undefined}
+              size="sm"
+            />
             <Button
               size="icon"
               className="h-5 w-5 rounded-full bg-foreground/80 hover:bg-foreground text-background disabled:opacity-30 disabled:bg-muted-foreground/30"
