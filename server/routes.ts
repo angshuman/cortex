@@ -332,6 +332,18 @@ export function registerRoutes(server: Server, app: Express) {
     ]);
   });
 
+  // ============ STATS ============
+  app.get("/api/stats", (req, res) => {
+    const storage = getVaultStorage(req);
+    res.json(storage.getStats());
+  });
+
+  app.post("/api/stats/reset", (req, res) => {
+    const storage = getVaultStorage(req);
+    storage.resetStats();
+    res.json({ ok: true });
+  });
+
   // ============ CONFIG (global) ============
   app.get("/api/config", (_req, res) => {
     res.json(vaultManager.getConfig());

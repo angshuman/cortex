@@ -18,6 +18,7 @@ import NotFound from "@/pages/not-found";
 import { ThemeProvider } from "@/components/theme-provider";
 import { VaultProvider } from "@/hooks/use-vault";
 import { ApiKeySetupDialog, useApiKeyCheck } from "@/components/api-key-dialog";
+import { StatusBar } from "@/components/status-bar";
 
 function AppRouter() {
   return (
@@ -66,7 +67,10 @@ export default function App() {
                 <div className="flex h-screen w-full bg-background">
                   <AppSidebar />
                   <main className="flex-1 flex flex-col min-w-0 overflow-hidden">
-                    <AppRouter />
+                    <div className="flex-1 flex flex-col min-h-0 overflow-hidden">
+                      <AppRouter />
+                    </div>
+                    <StatusBar />
                   </main>
                 </div>
               </SidebarProvider>

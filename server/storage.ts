@@ -2,6 +2,7 @@ import fs from "fs";
 import path from "path";
 import { v4 as uuid } from "uuid";
 import type { Note, InsertNote, Task, InsertTask, ChatSession, ChatEvent, Skill, Config, SearchResult, Vault, InsertVault, VaultSettings } from "@shared/schema";
+import { defaultSkills } from "./default-skills";
 
 const DEFAULT_DATA_DIR = path.join(process.cwd(), ".cortex-data");
 
@@ -397,8 +398,6 @@ export class FileStorage {
   }
 
   private initBuiltinSkills() {
-    // Import defaults lazily to avoid circular deps
-    const { defaultSkills } = require("./default-skills");
     const existingSkills = this.getSkills();
     const builtins: Skill[] = defaultSkills;
 
@@ -444,6 +443,25 @@ export class FileStorage {
     }
 
     writeJson(this.skillsPath(), Array.from(merged.values()));
+  }
+
+  // ============ STATS ============
+  private statsPath() { return path.join(this.dataDir, "stats.json"); }
+
+  getStats(): { totalInputTokens: number; totalOutputTokens: number; totalRequests: number } {
+    return readJson(this.statsPath(), { totalInputTokens: 0, totalOutputTokens: 0, totalRequests: 0 });
+  }
+
+  addTokenUsage(inputTokens: number, outputTokens: number): void {
+    const stats = this.getStats();
+    stats.totalInputTokens += inputTokens;
+    stats.totalOutputTokens += outputTokens;
+    stats.totalRequests += 1;
+    writeJson(this.statsPath(), stats);
+  }
+
+  resetStats(): void {
+    writeJson(this.statsPath(), { totalInputTokens: 0, totalOutputTokens: 0, totalRequests: 0 });
   }
 
   // ============ SEARCH ============

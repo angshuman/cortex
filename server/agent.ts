@@ -678,6 +678,12 @@ export class Agent {
         tools: claudeTools.length > 0 ? claudeTools : undefined,
       } as any);
 
+      // Track token usage
+      if ((response as any).usage) {
+        const u = (response as any).usage;
+        this.storage.addTokenUsage(u.input_tokens || 0, u.output_tokens || 0);
+      }
+
       let hasToolUse = false;
       let textContent = "";
       const toolResults: Array<{ name: string; input: any; result: string }> = [];
@@ -754,6 +760,14 @@ export class Agent {
         max_tokens: this.agentSettings.maxTokens,
         ...(this.agentSettings.temperature !== undefined ? { temperature: this.agentSettings.temperature } : {}),
       } as any);
+
+      // Track token usage
+      if (response.usage) {
+        this.storage.addTokenUsage(
+          response.usage.prompt_tokens || 0,
+          response.usage.completion_tokens || 0
+        );
+      }
 
       const choice = response.choices[0];
       const msg: any = choice.message;
