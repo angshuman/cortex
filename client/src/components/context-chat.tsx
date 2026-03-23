@@ -177,6 +177,8 @@ export function ContextChat({ context, open, onClose, placeholder, width, style,
     if (isUploading) return;
     setInput("");
     clearImages();
+    // Reset textarea height
+    if (inputRef.current) inputRef.current.style.height = "auto";
 
     const payload: any = { type: "chat", message: msg, context, vaultId };
     if (images) payload.images = images;
@@ -525,11 +527,17 @@ export function ContextChat({ context, open, onClose, placeholder, width, style,
             <Textarea
               ref={inputRef}
               value={input}
-              onChange={handleInputChange}
+              onChange={(e) => {
+                handleInputChange(e);
+                // Auto-resize
+                const ta = e.target;
+                ta.style.height = "auto";
+                ta.style.height = Math.min(ta.scrollHeight, 300) + "px";
+              }}
               onKeyDown={handleKeyDown}
               onPaste={handlePaste}
               placeholder={placeholder || (availableItems ? "Type @ to add notes..." : "Ask anything...")}
-              className="min-h-[32px] max-h-[100px] resize-none border-0 bg-transparent focus-visible:ring-0 focus-visible:ring-offset-0 text-xs px-3 pt-2.5 pb-0 leading-relaxed"
+              className="min-h-[32px] max-h-[300px] resize-none border-0 bg-transparent focus-visible:ring-0 focus-visible:ring-offset-0 text-xs px-3 pt-2.5 pb-0 leading-relaxed overflow-y-auto"
               rows={1}
               data-testid="input-context-chat"
             />

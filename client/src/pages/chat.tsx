@@ -136,6 +136,8 @@ export default function ChatPage() {
     if (isUploading) return; // Wait for uploads to finish
     setInput("");
     clearImages();
+    // Reset textarea height
+    if (inputRef.current) inputRef.current.style.height = "auto";
 
     const payload: any = { type: "chat", message: msg, vaultId };
     if (images) payload.images = images;
@@ -442,11 +444,17 @@ export default function ChatPage() {
             <Textarea
               ref={inputRef}
               value={input}
-              onChange={(e) => setInput(e.target.value)}
+              onChange={(e) => {
+                setInput(e.target.value);
+                // Auto-resize
+                const ta = e.target;
+                ta.style.height = "auto";
+                ta.style.height = Math.min(ta.scrollHeight, 400) + "px";
+              }}
               onKeyDown={handleKeyDown}
               onPaste={handlePaste}
               placeholder={isDragging ? "Drop image here..." : "Ask anything... (paste or drop images)"}
-              className="min-h-[44px] max-h-[200px] resize-none border-0 bg-transparent focus-visible:ring-0 focus-visible:ring-offset-0 text-sm px-4 pt-3 pb-0"
+              className="min-h-[44px] max-h-[400px] resize-none border-0 bg-transparent focus-visible:ring-0 focus-visible:ring-offset-0 text-sm px-4 pt-3 pb-0 overflow-y-auto"
               rows={1}
               data-testid="input-chat"
             />
