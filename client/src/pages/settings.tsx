@@ -52,6 +52,17 @@ import {
 } from "lucide-react";
 import { useToast } from "@/hooks/use-toast";
 import { ApiKeySetupDialog } from "@/components/api-key-dialog";
+/** Open a folder in the native file manager (Explorer / Finder) */
+async function openFolder(folderPath: string) {
+  // Prefer Electron IPC if available
+  const desktop = (window as any).cortexDesktop;
+  if (desktop?.openFolder) {
+    await desktop.openFolder(folderPath);
+  } else {
+    // Fallback to server-side endpoint
+    await apiRequest("POST", "/api/open-folder", { folderPath });
+  }
+}
 
 interface Skill {
   name: string;
@@ -249,9 +260,20 @@ export default function SettingsPage() {
                 <div>
                   <Label className="text-xs text-muted-foreground">Data Root Directory</Label>
                   <div className="flex items-center gap-2 mt-1">
-                    <code className="text-xs bg-muted px-2 py-1 rounded font-mono">
+                    <code className="text-xs bg-muted px-2 py-1 rounded font-mono flex-1 truncate">
                       {info?.dataDir || "~/.cortex-data"}
                     </code>
+                    <Button
+                      size="sm"
+                      variant="outline"
+                      className="h-7 text-xs gap-1.5 shrink-0"
+                      onClick={() => info?.dataDir && openFolder(info.dataDir)}
+                      disabled={!info?.dataDir}
+                      title="Open in file manager"
+                    >
+                      <ExternalLink className="w-3 h-3" />
+                      Open
+                    </Button>
                   </div>
                   <p className="text-[10px] text-muted-foreground mt-1">
                     Set CORTEX_DATA_DIR env variable to change. Individual vaults can override this with custom folder paths.
@@ -476,9 +498,22 @@ function VaultSettingsCard({
               <Badge variant="secondary" className="text-[9px] px-1.5 py-0 h-3.5">Active</Badge>
             )}
           </div>
-          <p className="text-[10px] text-muted-foreground font-mono truncate mt-0.5">
-            {pathInfo?.path || "loading..."}
-          </p>
+          <div className="flex items-center gap-1.5 mt-0.5">
+            <p className="text-[10px] text-muted-foreground font-mono truncate">
+              {pathInfo?.path || "loading..."}
+            </p>
+            {pathInfo?.path && (
+              <Button
+                variant="ghost"
+                size="icon"
+                className="h-4 w-4 shrink-0 text-muted-foreground hover:text-primary"
+                onClick={() => openFolder(pathInfo.path)}
+                title="Open vault folder"
+              >
+                <ExternalLink className="w-2.5 h-2.5" />
+              </Button>
+            )}
+          </div>
         </div>
       </div>
 

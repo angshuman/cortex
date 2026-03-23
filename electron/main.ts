@@ -1,4 +1,4 @@
-import { app, BrowserWindow, Tray, Menu, nativeImage, shell, dialog } from "electron";
+import { app, BrowserWindow, Tray, Menu, nativeImage, shell, dialog, ipcMain } from "electron";
 import path from "path";
 import { createServer } from "http";
 import net from "net";
@@ -272,6 +272,14 @@ function setupMenu() {
 
 // ============ App Lifecycle ============
 app.on("ready", async () => {
+  // IPC: Open a folder in the native file manager
+  ipcMain.handle("open-folder", async (_event, folderPath: string) => {
+    if (folderPath && typeof folderPath === "string") {
+      return shell.openPath(folderPath);
+    }
+    return "Invalid path";
+  });
+
   try {
     serverPort = await findAvailablePort();
     console.log(`[Cortex] Starting server on port ${serverPort}...`);

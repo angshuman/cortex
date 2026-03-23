@@ -578,6 +578,35 @@ export function registerRoutes(server: Server, app: Express) {
     }
   });
 
+  // ============ OPEN FOLDER (fallback for non-Electron) ============
+  app.post("/api/open-folder", (req, res) => {
+    const { folderPath } = req.body;
+    if (!folderPath || typeof folderPath !== "string") {
+      return res.status(400).json({ error: "folderPath is required" });
+    }
+    try {
+      const { exec } = require("child_process");
+      const platform = process.platform;
+      let cmd: string;
+      if (platform === "win32") {
+        cmd = `explorer "${folderPath.replace(/\//g, "\\\\")}"`;
+      } else if (platform === "darwin") {
+        cmd = `open "${folderPath}"`;
+      } else {
+        cmd = `xdg-open "${folderPath}"`;
+      }
+      exec(cmd, (err: any) => {
+        if (err) {
+          console.error("[open-folder]", err.message);
+          return res.status(500).json({ error: err.message });
+        }
+        res.json({ ok: true });
+      });
+    } catch (err: any) {
+      res.status(500).json({ error: err.message });
+    }
+  });
+
   // ============ INFO ============
   app.get("/api/info", (_req, res) => {
     const provider = vaultManager.detectProvider();

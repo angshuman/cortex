@@ -1,7 +1,6 @@
 import { contextBridge, ipcRenderer } from "electron";
 
 // Expose a minimal, secure API to the renderer process.
-// Currently just platform info and version — extend as needed.
 contextBridge.exposeInMainWorld("cortexDesktop", {
   platform: process.platform,
   isElectron: true,
@@ -10,4 +9,6 @@ contextBridge.exposeInMainWorld("cortexDesktop", {
     node: process.versions.node,
     chrome: process.versions.chrome,
   },
+  /** Open a folder in the native file manager (Explorer / Finder) */
+  openFolder: (folderPath: string) => ipcRenderer.invoke("open-folder", folderPath),
 });
