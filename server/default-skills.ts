@@ -13,7 +13,7 @@ export const defaultSkills: Skill[] = [
   {
     name: "note-taker",
     description: "Create, read, update and search notes",
-    version: "2.0.0",
+    version: "2.1.0",
     category: "core",
     priority: 0,
     triggerKeywords: [],
@@ -47,11 +47,12 @@ You manage the user's note library. Notes are markdown files organized in folder
 - Extract all visible text from images into the note content
 - Add descriptive tags: screenshot, diagram, photo, receipt, code, whiteboard, document`,
     tools: [
-      { name: "create_note", description: "Create a new note", parameters: [
+      { name: "create_note", description: "Create a new note. If image_urls are provided, they are automatically embedded in the note content and copied to the note's assets folder.", parameters: [
         { name: "title", type: "string", description: "Note title", required: true },
         { name: "content", type: "string", description: "Markdown content", required: true },
         { name: "folder", type: "string", description: "Folder path (e.g. /projects)", required: false },
         { name: "tags", type: "string[]", description: "Tags for the note", required: false },
+        { name: "image_urls", type: "string[]", description: "Chat image URLs to attach to the note (e.g. /api/chat/assets/xxx.png). These will be copied to the note's own assets folder and embedded in the content.", required: false },
       ]},
       { name: "read_note", description: "Read a note by ID", parameters: [
         { name: "id", type: "string", description: "Note ID", required: true },

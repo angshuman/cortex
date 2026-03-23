@@ -176,16 +176,34 @@ async function executeTool(name: string, args: Record<string, any>, storage: Fil
   try {
     switch (name) {
       case "create_note": {
+        let content = args.content || "";
+        const imageUrls: string[] = args.image_urls || [];
+
         const note = storage.createNote({
           title: args.title || "Untitled",
-          content: args.content || "",
+          content,
           folder: args.folder,
           tags: args.tags,
         });
-        // Migrate any chat asset images into the note's own assets folder
-        const migratedContent = storage.migrateContentImages(note.id, note.content);
-        if (migratedContent !== note.content) {
-          storage.updateNote(note.id, { content: migratedContent, attachments: ["migrated"] });
+
+        // If image_urls were passed explicitly, copy them to note assets and prepend to content
+        if (imageUrls.length > 0) {
+          const imageParts: string[] = [];
+          for (const imgUrl of imageUrls) {
+            const newUrl = storage.migrateImageToNote(note.id, imgUrl);
+            if (newUrl) {
+              imageParts.push(`![image](${newUrl})`);
+            }
+          }
+          if (imageParts.length > 0) {
+            content = imageParts.join("\n") + "\n\n" + content;
+          }
+        }
+
+        // Also migrate any inline chat asset refs already in the content
+        content = storage.migrateContentImages(note.id, content);
+        if (content !== note.content) {
+          storage.updateNote(note.id, { content });
         }
         return JSON.stringify({ success: true, note: { id: note.id, title: note.title } });
       }
@@ -479,14 +497,16 @@ ${mcpStatus}
 ## Image Handling
 When a user sends images:
 - You can see the image content. Describe what you observe.
+- The image URLs are provided as text alongside the images (e.g. /api/chat/assets/xxx.png). Use these EXACT URLs in markdown.
 - If the user asks you to do something with the image (save to note, extract info, create tasks), do it using your tools.
 - If the user sends ONLY an image with no text, automatically:
   1. Analyze the image thoroughly (describe content, extract any text/data, identify key info)
   2. Create a note with a descriptive title summarizing the image content
-  3. Include the image in the note markdown as \`![description](image_url)\`
+  3. Include the image in the note markdown using the exact URL provided: \`![description](/api/chat/assets/xxx.png)\`
   4. Add metadata tags (e.g. screenshot, diagram, photo, receipt, code, whiteboard, document)
   5. Put it in /inbox folder
-- When creating notes from images, always include the original image URL in the markdown content so the image is visible in the note.
+- IMPORTANT: When creating notes from images, pass the image URLs via the \`image_urls\` parameter on \`create_note\`. This automatically copies the image into the note's own assets folder. Also include the URL in the markdown content as \`![description](url)\` — the system rewrites it to the copied path.
+- Never fabricate or guess image URLs — always use the exact URLs provided in the message.
 
 ## Current Context
 ${taskSummary}
@@ -623,8 +643,14 @@ export class Agent {
       }
     }
 
+    // Tell the AI the actual image URLs so it can reference them in notes
+    if (images && images.length > 0) {
+      const urlList = images.map(i => i.url).join("\n");
+      contentBlocks.push({ type: "text", text: `[Image URLs for reference — use these when creating notes]\n${urlList}` });
+    }
+
     // If user sent only image(s) with no text, inject auto-analysis instruction
-    const effectiveMessage = userMessage || "The user pasted this image without any text. Analyze the image thoroughly: describe what you see, extract any text/data, identify key information, and then automatically save it as a note with a descriptive title. Include the image in the note content. Add relevant tags based on the content (e.g. screenshot, diagram, photo, receipt, code, whiteboard, etc). Put it in the /inbox folder.";
+    const effectiveMessage = userMessage || "The user pasted this image without any text. Analyze the image thoroughly: describe what you see, extract any text/data, identify key information, and then automatically save it as a note with a descriptive title. Include the image in the note content using the image URLs provided. Add relevant tags based on the content (e.g. screenshot, diagram, photo, receipt, code, whiteboard, etc). Put it in the /inbox folder.";
     contentBlocks.push({ type: "text", text: effectiveMessage });
 
     this.messages.push({ role: "user", content: contentBlocks });

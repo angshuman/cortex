@@ -177,6 +177,9 @@ export class FileStorage {
     if (chatMatch) {
       originalFilename = chatMatch[1];
       buffer = this.getChatAsset(originalFilename);
+      if (!buffer) {
+        console.log(`[migrate] Chat asset not found: ${originalFilename} in ${this.dataDir}`);
+      }
     }
 
     // /api/notes/<noteId>/assets/<filename>
@@ -188,11 +191,16 @@ export class FileStorage {
       }
     }
 
-    if (!buffer) return null;
+    if (!buffer) {
+      console.log(`[migrate] Could not find source image for URL: ${sourceUrl}`);
+      return null;
+    }
 
     // Save to this note's assets folder
     const newFilename = `${Date.now()}-${originalFilename}`;
-    return this.saveNoteAsset(noteId, newFilename, buffer);
+    const newUrl = this.saveNoteAsset(noteId, newFilename, buffer);
+    console.log(`[migrate] Copied image to note ${noteId}: ${sourceUrl} -> ${newUrl}`);
+    return newUrl;
   }
 
   /**
@@ -202,15 +210,22 @@ export class FileStorage {
    */
   migrateContentImages(noteId: string, content: string): string {
     // Match markdown images: ![alt](/api/chat/assets/...) or ![alt](/api/notes/OTHER_ID/assets/...)
-    return content.replace(
+    let matchCount = 0;
+    const result = content.replace(
       /(!\[[^\]]*\])\((\/api\/(?:chat\/assets|notes\/[^/]+\/assets)\/[^)]+)\)/g,
       (_match, altPart, url) => {
+        matchCount++;
         // Don't migrate if already pointing to this note's assets
         if (url.startsWith(`/api/notes/${noteId}/assets/`)) return _match;
+        console.log(`[migrate] Found image in note ${noteId}: ${url}`);
         const newUrl = this.migrateImageToNote(noteId, url);
         return newUrl ? `${altPart}(${newUrl})` : _match;
       }
     );
+    if (matchCount === 0 && content.includes("/api/")) {
+      console.log(`[migrate] No image markdown matched in note ${noteId}, but content contains /api/. Content snippet: ${content.slice(0, 300)}`);
+    }
+    return result;
   }
 
   // ============ FILES (user-uploaded file storage) ============
