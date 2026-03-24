@@ -121,28 +121,34 @@ class McpClientManager {
       stderr: "pipe",
     });
 
-    // Capture stderr for auth messages (device code flow, login URLs)
+    // Capture stderr for auth messages (device code flow, login URLs, errors)
     const stderr = transport.stderr;
     if (stderr) {
-      let buffer = "";
+      let lineBuffer = "";
       stderr.on("data", (chunk: Buffer) => {
-        const text = chunk.toString();
-        buffer += text;
-        console.log(`[MCP:${serverName}:stderr] ${text.trim()}`);
-        // Detect auth URLs or device codes
-        const urlMatch = text.match(/(https?:\/\/[^\s]+)/g);
-        const codeMatch = text.match(/code[:\s]+([A-Z0-9]{6,})/i);
-        if (urlMatch || codeMatch) {
-          this.authMessages.push({
-            serverName,
-            message: buffer.trim(),
-            url: urlMatch?.[0],
-            code: codeMatch?.[1],
-            timestamp: new Date().toISOString(),
-          });
-          // Keep only last 10 messages
-          if (this.authMessages.length > 10) this.authMessages.shift();
-          buffer = "";
+        lineBuffer += chunk.toString();
+        // Process complete lines
+        const lines = lineBuffer.split("\n");
+        lineBuffer = lines.pop() ?? ""; // Keep incomplete last line
+        for (const line of lines) {
+          const trimmed = line.trim();
+          if (!trimmed) continue;
+          console.log(`[MCP:${serverName}:stderr] ${trimmed}`);
+          const urlMatch = trimmed.match(/(https?:\/\/[^\s]+)/g);
+          const codeMatch = trimmed.match(/(?:enter.*?code|device code)[:\s]+([A-Z0-9\-]{6,})/i)
+            ?? trimmed.match(/^([A-Z0-9\-]{6,})$/) // bare code on its own line
+            ?? trimmed.match(/code[:\s]+([A-Z0-9]{6,})/i);
+          // Surface auth-related lines and any error/warning output
+          if (urlMatch || codeMatch || /error|warning|sign.?in|authenticat|login|token|expired/i.test(trimmed)) {
+            this.authMessages.push({
+              serverName,
+              message: trimmed,
+              url: urlMatch?.[0],
+              code: codeMatch?.[1],
+              timestamp: new Date().toISOString(),
+            });
+            if (this.authMessages.length > 20) this.authMessages.shift();
+          }
         }
       });
     }
@@ -186,6 +192,22 @@ class McpClientManager {
     const parts: string[] = [];
     for (const block of content) {
       if (block.type === "text" && block.text) {
+        // Detect workiq auth-required responses and surface them
+        try {
+          const parsed = JSON.parse(block.text);
+          if (parsed?.error && !parsed?.response) {
+            const msg = parsed.error as string;
+            // Push to auth messages so UI can show login prompt
+            if (/auth|sign.?in|login|token|credential|unauthorized|403|401/i.test(msg)) {
+              this.authMessages.push({
+                serverName,
+                message: `${serverName}: ${msg} — try reconnecting or signing in again.`,
+                timestamp: new Date().toISOString(),
+              });
+              if (this.authMessages.length > 20) this.authMessages.shift();
+            }
+          }
+        } catch { /* not JSON, that's fine */ }
         parts.push(block.text);
       } else if (block.type === "image" && block.data) {
         // Return base64 image data marker so agent can handle it
