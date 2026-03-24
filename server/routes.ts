@@ -697,6 +697,20 @@ export function registerRoutes(server: Server, app: Express) {
           });
 
           const context: ContextItem[] = data.context || [];
+
+          // Add attached files as context items
+          const attachedFiles: Array<{ id: string; name: string; mimeType: string }> = data.files || [];
+          for (const f of attachedFiles) {
+            const fileText = store.getFileText(f.id);
+            context.push({
+              type: "file",
+              title: f.name,
+              content: fileText || `[File: ${f.name}]`,
+              id: f.id,
+              mimeType: f.mimeType,
+            });
+          }
+
           const agentSettings = globalConfig.agent || undefined;
           const agent = new Agent(sessionId, (event) => broadcast(event), context, store, vaultSettings, agentSettings);
 

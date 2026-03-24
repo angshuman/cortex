@@ -9,10 +9,11 @@ import type { ChatEvent, Skill, VaultSettings, AgentSettings } from "@shared/sch
 type EventCallback = (event: ChatEvent) => void;
 
 export interface ContextItem {
-  type: "note" | "task" | "text";
+  type: "note" | "task" | "text" | "file";
   title: string;
   content: string;
   id?: string;
+  mimeType?: string;
 }
 
 interface ImageBlock {
@@ -346,6 +347,26 @@ async function executeTool(name: string, args: Record<string, any>, storage: Fil
           return JSON.stringify({ error: `Browser tool error: ${err.message}` });
         }
       }
+      case "list_files": {
+        const files = storage.getFiles();
+        return JSON.stringify(files.map((f: any) => ({ id: f.id, name: f.name, size: f.size, mimeType: f.mimeType, createdAt: f.createdAt })));
+      }
+      case "read_file": {
+        const fileText = storage.getFileText(args.id);
+        if (fileText !== null) return fileText;
+        // Check if it's an image — return description
+        const fileMeta = storage.getFiles().find((f: any) => f.id === args.id) as any;
+        if (fileMeta?.mimeType?.startsWith("image/")) {
+          return `[Image file: ${fileMeta.name}. The image is attached as visual content if in chat context.]`;
+        }
+        return JSON.stringify({ error: "File not found" });
+      }
+      case "search_files": {
+        const q = (args.query || "").toLowerCase();
+        const allFiles = storage.getFiles();
+        const matches = allFiles.filter((f: any) => f.name.toLowerCase().includes(q));
+        return JSON.stringify(matches.map((f: any) => ({ id: f.id, name: f.name, size: f.size, mimeType: f.mimeType })));
+      }
       default: {
         // Check if any MCP server handles this tool
         const mcpServer = mcpManager.findServerForTool(name);
@@ -381,6 +402,18 @@ function imageUrlToBase64(url: string, storage: FileStorage): { base64: string; 
           gif: "image/gif", webp: "image/webp", svg: "image/svg+xml", bmp: "image/bmp",
         };
         return { base64: buf.toString("base64"), mediaType: mimeMap[ext] || "image/png" };
+      }
+      // Support vault files: /api/files/:id/:filename
+      const fileMatch = url.match(/\/api\/files\/([^/]+)\//);
+      if (fileMatch) {
+        const fileData = storage.getFile(fileMatch[1]);
+        if (!fileData) return null;
+        const ext = fileData.name.split(".").pop()?.toLowerCase() || "png";
+        const mimeMap: Record<string, string> = {
+          png: "image/png", jpg: "image/jpeg", jpeg: "image/jpeg",
+          gif: "image/gif", webp: "image/webp", svg: "image/svg+xml", bmp: "image/bmp",
+        };
+        return { base64: fileData.buffer.toString("base64"), mediaType: mimeMap[ext] || "image/png" };
       }
       return null;
     }
@@ -651,10 +684,20 @@ export class Agent {
       contentBlocks.push({ type: "text", text: `[Image URLs for reference — use these when creating notes]\n${urlList}` });
     }
 
-    // Attach images from context notes so the LLM can actually see them
+    // Attach images from context notes/files so the LLM can actually see them
     if (this.context.length > 0) {
-      const imgRegex = /!\[[^\]]*\]\((\/api\/(?:notes\/[^/]+\/assets|chat\/assets)\/[^)]+)\)/g;
+      const imgRegex = /!\[[^\]]*\]\((\/api\/(?:notes\/[^/]+\/assets|chat\/assets|files\/[^/]+\/[^)]+)\/[^)]*?)\)/g;
       for (const item of this.context) {
+        // For file-type context items that are images, add as image blocks
+        if (item.type === "file" && item.mimeType?.startsWith("image/") && item.id) {
+          const fileMeta = this.storage.getFiles().find((f: any) => f.id === item.id) as any;
+          if (fileMeta) {
+            const fileUrl = `/api/files/${fileMeta.id}/${encodeURIComponent(fileMeta.name)}`;
+            contentBlocks.push({ type: "image", url: fileUrl, mediaType: item.mimeType });
+          }
+          continue;
+        }
+        // For notes, extract image markdown
         let match;
         while ((match = imgRegex.exec(item.content)) !== null) {
           const imgUrl = match[1];
@@ -688,6 +731,7 @@ export class Agent {
         const idStr = item.id ? ` (id: ${item.id})` : "";
         const header = item.type === "note" ? `Note: "${item.title}"${idStr}` :
                        item.type === "task" ? `Task: "${item.title}"${idStr}` :
+                       item.type === "file" ? `File: "${item.title}"${idStr}` :
                        `Context: "${item.title}"`;
         return `### ${header}\n${item.content}`;
       }).join("\n\n");

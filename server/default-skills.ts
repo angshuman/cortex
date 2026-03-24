@@ -490,4 +490,30 @@ When the user needs help with meetings:
 - Keep it brief — bullet points, not paragraphs`,
     tools: [],
   },
+
+  // ============================================================
+  //  FILE MANAGER
+  // ============================================================
+  {
+    name: "file-manager",
+    description: "List, read, and search uploaded files",
+    version: "1.0.0",
+    category: "core",
+    priority: 0,
+    triggerKeywords: [],
+    instructionsOnly: false,
+    builtin: true,
+    enabled: true,
+    filePath: null,
+    instructions: `You can access the user's uploaded files. Use these tools to list, read, and search files.`,
+    tools: [
+      { name: "list_files", description: "List all uploaded files in the vault", parameters: [] },
+      { name: "read_file", description: "Read the text content of a file by ID. Returns text for documents, or describes images.", parameters: [
+        { name: "id", type: "string", description: "File ID", required: true },
+      ]},
+      { name: "search_files", description: "Search files by name", parameters: [
+        { name: "query", type: "string", description: "Search query", required: true },
+      ]},
+    ],
+  },
 ];

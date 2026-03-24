@@ -12,12 +12,14 @@ import {
   CheckSquare,
   ChevronRight,
   Search,
+  Paperclip,
 } from "lucide-react";
 
 interface AttachMenuItem {
-  type: "note" | "task";
+  type: "note" | "task" | "file";
   id: string;
   title: string;
+  mimeType?: string;
 }
 
 interface AttachMenuProps {
@@ -31,7 +33,7 @@ interface AttachMenuProps {
 
 export function AttachMenu({ onUploadFile, onAttachItem, size = "md" }: AttachMenuProps) {
   const [open, setOpen] = useState(false);
-  const [submenu, setSubmenu] = useState<"notes" | "tasks" | null>(null);
+  const [submenu, setSubmenu] = useState<"notes" | "tasks" | "files" | null>(null);
   const [filter, setFilter] = useState("");
   const filterRef = useRef<HTMLInputElement>(null);
   const { vaultParam, vaultId } = useVault();
@@ -48,18 +50,26 @@ export function AttachMenu({ onUploadFile, onAttachItem, size = "md" }: AttachMe
     enabled: !!vaultId && open,
   });
 
+  const { data: files = [] } = useQuery<any[]>({
+    queryKey: ["/api/files", vaultId],
+    queryFn: () => apiRequest("GET", withVault("/api/files", vaultParam)).then(r => r.json()),
+    enabled: !!vaultId && open,
+  });
+
   const filteredItems = useMemo(() => {
-    const items = submenu === "notes" ? notes : submenu === "tasks" ? tasks : [];
+    const items = submenu === "notes" ? notes : submenu === "tasks" ? tasks : submenu === "files" ? files : [];
+    const nameField = submenu === "files" ? "name" : "title";
     if (!filter) return items.slice(0, 20);
     const q = filter.toLowerCase();
-    return items.filter((i: any) => i.title?.toLowerCase().includes(q)).slice(0, 20);
-  }, [submenu, notes, tasks, filter]);
+    return items.filter((i: any) => (i[nameField] || "").toLowerCase().includes(q)).slice(0, 20);
+  }, [submenu, notes, tasks, files, filter]);
 
   const handleSelect = (item: any) => {
     onAttachItem?.({
-      type: submenu === "notes" ? "note" : "task",
+      type: submenu === "notes" ? "note" : submenu === "files" ? "file" : "task",
       id: item.id,
-      title: item.title,
+      title: item.title || item.name,
+      mimeType: item.mimeType,
     });
     setOpen(false);
     setSubmenu(null);
@@ -127,6 +137,14 @@ export function AttachMenu({ onUploadFile, onAttachItem, size = "md" }: AttachMe
                   <span className="flex-1 text-left">Add tasks</span>
                   <ChevronRight className="w-3 h-3 text-muted-foreground/50" />
                 </button>
+                <button
+                  className="flex items-center gap-2.5 px-3 py-2 text-xs text-foreground rounded-md hover:bg-muted/60 transition-colors"
+                  onClick={() => { setSubmenu("files"); setTimeout(() => filterRef.current?.focus(), 50); }}
+                >
+                  <Paperclip className="w-3.5 h-3.5 text-muted-foreground" />
+                  <span className="flex-1 text-left">Add files</span>
+                  <ChevronRight className="w-3 h-3 text-muted-foreground/50" />
+                </button>
               </>
             )}
           </div>
@@ -138,7 +156,7 @@ export function AttachMenu({ onUploadFile, onAttachItem, size = "md" }: AttachMe
               onClick={handleBack}
             >
               <ChevronRight className="w-2.5 h-2.5 rotate-180" />
-              {submenu === "notes" ? "Notes" : "Tasks"}
+              {submenu === "notes" ? "Notes" : submenu === "files" ? "Files" : "Tasks"}
             </button>
             <div className="px-1.5 pb-1.5">
               <div className="relative">
@@ -166,9 +184,11 @@ export function AttachMenu({ onUploadFile, onAttachItem, size = "md" }: AttachMe
                 >
                   {submenu === "notes"
                     ? <FileText className="w-3 h-3 text-muted-foreground/50 shrink-0" />
+                    : submenu === "files"
+                    ? <Paperclip className="w-3 h-3 text-muted-foreground/50 shrink-0" />
                     : <CheckSquare className="w-3 h-3 text-muted-foreground/50 shrink-0" />
                   }
-                  <span className="truncate text-foreground">{item.title}</span>
+                  <span className="truncate text-foreground">{item.title || item.name}</span>
                 </button>
               ))}
             </div>

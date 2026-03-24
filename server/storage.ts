@@ -264,6 +264,29 @@ export class FileStorage {
     return { buffer: fs.readFileSync(filePath), name: meta.name, mimeType: meta.mimeType };
   }
 
+  /** Extract readable text from a file. Returns null for images/binary. */
+  getFileText(id: string): string | null {
+    const file = this.getFile(id);
+    if (!file) return null;
+    const { buffer, name, mimeType } = file;
+    // Images — handled separately as visual content
+    if (mimeType.startsWith("image/")) return null;
+    // Text, code, JSON, CSV, XML, YAML etc
+    if (mimeType.startsWith("text/") || mimeType.includes("json") || mimeType.includes("xml") ||
+        mimeType.includes("yaml") || mimeType.includes("csv") || mimeType.includes("javascript") ||
+        mimeType.includes("typescript") || mimeType.includes("markdown")) {
+      return buffer.toString("utf-8");
+    }
+    // PDF placeholder
+    if (mimeType.includes("pdf")) return `[PDF file: ${name}]`;
+    // Office docs placeholder
+    if (mimeType.includes("word") || mimeType.includes("document") || mimeType.includes("spreadsheet") ||
+        mimeType.includes("presentation") || mimeType.includes("excel") || mimeType.includes("powerpoint")) {
+      return `[Office document: ${name}]`;
+    }
+    return `[Binary file: ${name} (${mimeType})]`;
+  }
+
   deleteFile(id: string): boolean {
     const files = readJson(this.filesMetaPath(), []) as any[];
     const idx = files.findIndex((f: any) => f.id === id);

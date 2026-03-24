@@ -35,10 +35,11 @@ interface ChatEvent {
 }
 
 export interface ContextItem {
-  type: "note" | "task" | "text";
+  type: "note" | "task" | "text" | "file";
   title: string;
   content: string;
   id?: string;
+  mimeType?: string;
 }
 
 interface ContextChatProps {
@@ -414,7 +415,7 @@ export function ContextChat({ context, open, onClose, placeholder, width, style,
         <div className="px-3 py-2 border-b border-border/50 flex flex-wrap gap-1">
           {context.map((item, i) => (
             <Badge key={item.id || i} variant="secondary" className="text-[9px] px-1.5 py-0 h-4 gap-1 group/badge">
-              {item.type === "note" ? <FileText className="w-2.5 h-2.5" /> : <CheckSquare className="w-2.5 h-2.5" />}
+              {item.type === "note" ? <FileText className="w-2.5 h-2.5" /> : item.type === "file" ? <Paperclip className="w-2.5 h-2.5" /> : <CheckSquare className="w-2.5 h-2.5" />}
               <span className="truncate max-w-[150px] inline-block align-bottom" title={item.title}>{item.title}</span>
               {onRemoveContext && item.id && (
                 <button
@@ -518,7 +519,7 @@ export function ContextChat({ context, open, onClose, placeholder, width, style,
                     onMouseDown={(e) => { e.preventDefault(); selectMention(item); }}
                     onMouseEnter={() => setMentionIndex(i)}
                   >
-                    {item.type === "note" ? <FileText className="w-3 h-3 shrink-0" /> : <CheckSquare className="w-3 h-3 shrink-0" />}
+                    {item.type === "note" ? <FileText className="w-3 h-3 shrink-0" /> : item.type === "file" ? <Paperclip className="w-3 h-3 shrink-0" /> : <CheckSquare className="w-3 h-3 shrink-0" />}
                     <span className="truncate">{item.title}</span>
                   </button>
                 ))}

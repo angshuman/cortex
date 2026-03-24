@@ -62,6 +62,7 @@ export default function ChatPage() {
     addImage, removeImage, clearImages, handlePaste, handleDrop, handleDragOver,
   } = useImagePaste(vaultParam);
   const [isDragging, setIsDragging] = useState(false);
+  const [attachedFiles, setAttachedFiles] = useState<Array<{ id: string; name: string; mimeType: string }>>([]); 
 
   // Skills
   const { data: skills = [] } = useQuery<Skill[]>({
@@ -147,15 +148,18 @@ export default function ChatPage() {
   const handleSend = useCallback(async () => {
     const msg = input.trim();
     const images = uploadedImages.length > 0 ? uploadedImages : undefined;
-    if ((!msg && !images) || status === "thinking") return;
+    if ((!msg && !images && attachedFiles.length === 0) || status === "thinking") return;
     if (isUploading) return; // Wait for uploads to finish
     setInput("");
     clearImages();
+    const sentFiles = [...attachedFiles];
+    setAttachedFiles([]);
     // Reset textarea height
     if (inputRef.current) inputRef.current.style.height = "auto";
 
     const payload: any = { type: "chat", message: msg, vaultId };
     if (images) payload.images = images;
+    if (sentFiles.length > 0) payload.files = sentFiles;
     if (pinnedSkills.length > 0) payload.pinnedSkills = pinnedSkills;
 
     let targetSessionId = sessionId;
@@ -418,6 +422,21 @@ export default function ChatPage() {
         onDragLeave={() => setIsDragging(false)}
       >
         <div className="max-w-3xl mx-auto">
+          {/* Attached file badges */}
+          {attachedFiles.length > 0 && (
+            <div className="flex flex-wrap gap-1.5 mb-2">
+              {attachedFiles.map(f => (
+                <div key={f.id} className="flex items-center gap-1.5 bg-muted/50 border border-border/40 rounded-lg px-2.5 py-1 text-xs text-muted-foreground group">
+                  <Paperclip className="w-3 h-3 shrink-0" />
+                  <span className="truncate max-w-[150px]">{f.name}</span>
+                  <button onClick={() => setAttachedFiles(prev => prev.filter(x => x.id !== f.id))} className="opacity-0 group-hover:opacity-100 transition-opacity">
+                    <X className="w-3 h-3" />
+                  </button>
+                </div>
+              ))}
+            </div>
+          )}
+
           {/* Image previews */}
           {pendingImages.length > 0 && (
             <div className="flex flex-wrap gap-2 mb-2">
@@ -498,12 +517,25 @@ export default function ChatPage() {
             <input
               ref={fileInputRef}
               type="file"
-              accept="image/*"
               multiple
               className="hidden"
-              onChange={(e) => {
+              onChange={async (e) => {
                 const files = e.target.files;
-                if (files) Array.from(files).forEach(f => addImage(f));
+                if (!files) return;
+                for (const f of Array.from(files)) {
+                  if (f.type.startsWith("image/")) {
+                    addImage(f);
+                  } else {
+                    // Upload non-image files to vault
+                    const formData = new FormData();
+                    formData.append("file", f);
+                    try {
+                      const res = await fetch(withVault("/api/files", vaultParam), { method: "POST", body: formData });
+                      const data = await res.json();
+                      setAttachedFiles(prev => [...prev, { id: data.id, name: data.name, mimeType: data.mimeType }]);
+                    } catch {}
+                  }
+                }
                 e.target.value = "";
               }}
             />
