@@ -995,6 +995,13 @@ function McpServersCard({
     queryFn: () => apiRequest("GET", "/api/mcp/presets").then(r => r.json()),
   });
 
+  // Poll auth messages (device code flow from MCP servers)
+  const { data: authMessages = [] } = useQuery<Array<{ serverName: string; message: string; url?: string; code?: string; timestamp: string }>>({
+    queryKey: ["/api/mcp/auth"],
+    queryFn: () => apiRequest("GET", "/api/mcp/auth").then(r => r.json()),
+    refetchInterval: 2000,
+  });
+
   const configuredServers = Object.keys(config?.mcpServers || {});
   // Merge: configured servers + connected servers (may include playwright via legacy field)
   const allServerNames = Array.from(new Set([
@@ -1252,6 +1259,49 @@ function McpServersCard({
                   <p className="text-[10px] text-muted-foreground">{setupNotes}</p>
                 </div>
               )}
+
+              {/* Auth message banner (device code flow) */}
+              {authMessages.filter(m => m.serverName === name).slice(-1).map((auth, i) => (
+                <div key={i} className="mt-2 bg-muted/40 border border-border/50 rounded-md p-2.5">
+                  <p className="text-[10px] text-foreground mb-1.5 font-medium">Authentication required</p>
+                  <p className="text-[10px] text-muted-foreground whitespace-pre-wrap mb-2">{auth.message}</p>
+                  <div className="flex items-center gap-2">
+                    {auth.url && (
+                      <Button
+                        size="sm"
+                        variant="outline"
+                        className="h-6 text-[10px] gap-1"
+                        onClick={() => {
+                          // Open in system browser (Electron or fallback)
+                          const desktop = (window as any).cortexDesktop;
+                          if (desktop?.openFolder) {
+                            // Use shell.openExternal via IPC if available
+                            window.open(auth.url, "_blank");
+                          } else {
+                            window.open(auth.url, "_blank");
+                          }
+                        }}
+                      >
+                        <ExternalLink className="w-2.5 h-2.5" />
+                        Open Login Page
+                      </Button>
+                    )}
+                    {auth.code && (
+                      <Button
+                        size="sm"
+                        variant="ghost"
+                        className="h-6 text-[10px] gap-1 font-mono"
+                        onClick={() => {
+                          navigator.clipboard.writeText(auth.code!);
+                          toast({ title: "Code copied", description: auth.code });
+                        }}
+                      >
+                        Code: {auth.code} (click to copy)
+                      </Button>
+                    )}
+                  </div>
+                </div>
+              ))}
             </div>
           );
         })}

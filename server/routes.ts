@@ -397,6 +397,17 @@ export function registerRoutes(server: Server, app: Express) {
     res.json(mcpManager.getPresets());
   });
 
+  // Get auth messages (device code flow, login URLs from MCP server stderr)
+  app.get("/api/mcp/auth", (_req, res) => {
+    res.json(mcpManager.authMessages);
+  });
+
+  // Clear auth messages
+  app.delete("/api/mcp/auth", (_req, res) => {
+    mcpManager.authMessages = [];
+    res.json({ ok: true });
+  });
+
   // Connect a specific MCP server by name
   app.post("/api/mcp/connect/:name", async (req, res) => {
     const serverName = req.params.name as string;

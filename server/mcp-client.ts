@@ -25,6 +25,14 @@ export interface McpConnection {
   serverName: string;
 }
 
+export interface McpAuthMessage {
+  serverName: string;
+  message: string;
+  url?: string;
+  code?: string;
+  timestamp: string;
+}
+
 /**
  * Known MCP server presets — provides sensible defaults for popular servers.
  * Users can override any of these via config, or add entirely custom servers.
@@ -65,6 +73,8 @@ export const MCP_PRESETS: Record<string, McpServerPreset> = {
 class McpClientManager {
   private connections = new Map<string, McpConnection>();
   private connecting = new Map<string, Promise<McpConnection>>();
+  /** Auth messages captured from MCP server stderr (device code flow, login URLs, etc.) */
+  authMessages: McpAuthMessage[] = [];
 
   /**
    * Connect to an MCP server by name.
@@ -110,6 +120,32 @@ class McpClientManager {
       env: env ? { ...process.env as Record<string, string>, ...env } : undefined,
       stderr: "pipe",
     });
+
+    // Capture stderr for auth messages (device code flow, login URLs)
+    const stderr = transport.stderr;
+    if (stderr) {
+      let buffer = "";
+      stderr.on("data", (chunk: Buffer) => {
+        const text = chunk.toString();
+        buffer += text;
+        console.log(`[MCP:${serverName}:stderr] ${text.trim()}`);
+        // Detect auth URLs or device codes
+        const urlMatch = text.match(/(https?:\/\/[^\s]+)/g);
+        const codeMatch = text.match(/code[:\s]+([A-Z0-9]{6,})/i);
+        if (urlMatch || codeMatch) {
+          this.authMessages.push({
+            serverName,
+            message: buffer.trim(),
+            url: urlMatch?.[0],
+            code: codeMatch?.[1],
+            timestamp: new Date().toISOString(),
+          });
+          // Keep only last 10 messages
+          if (this.authMessages.length > 10) this.authMessages.shift();
+          buffer = "";
+        }
+      });
+    }
 
     const client = new Client({
       name: "cortex",
