@@ -92,7 +92,7 @@ function resolveKey(provider: "openai" | "anthropic" | "grok" | "google"): strin
  * Priority 0 skills and skills without triggerKeywords are always included.
  * Others are matched by keyword against the user's message and context.
  */
-function selectRelevantSkills(allSkills: Skill[], userMessage: string, contextItems: ContextItem[] = []): Skill[] {
+function selectRelevantSkills(allSkills: Skill[], userMessage: string, contextItems: ContextItem[] = [], forcedSkillNames: string[] = []): Skill[] {
   const messageLower = userMessage.toLowerCase();
   const contextText = contextItems.map(c => c.title + " " + c.content).join(" ").toLowerCase();
   const combined = messageLower + " " + contextText;
@@ -100,6 +100,8 @@ function selectRelevantSkills(allSkills: Skill[], userMessage: string, contextIt
   const selected: Skill[] = [];
   for (const skill of allSkills) {
     if (!skill.enabled) continue;
+    // Force-include if explicitly pinned by user
+    if (forcedSkillNames.includes(skill.name)) { selected.push(skill); continue; }
     // Priority 0 = always include
     if ((skill.priority ?? 1) === 0) { selected.push(skill); continue; }
     // No trigger keywords = always include (backward compat)
@@ -449,9 +451,9 @@ function messagesToOpenAI(messages: AgentMessage[], systemPrompt: string, storag
   return result;
 }
 
-function buildSystemPrompt(storage: FileStorage, vaultSettings?: VaultSettings, agentSettings?: AgentSettings, userMessage?: string, contextItems?: ContextItem[]): string {
+function buildSystemPrompt(storage: FileStorage, vaultSettings?: VaultSettings, agentSettings?: AgentSettings, userMessage?: string, contextItems?: ContextItem[], forcedSkillNames?: string[]): string {
   const allSkills = storage.getSkills();
-  const relevant = selectRelevantSkills(allSkills, userMessage || "", contextItems || []);
+  const relevant = selectRelevantSkills(allSkills, userMessage || "", contextItems || [], forcedSkillNames || []);
   const skillInstructions = relevant.map((s: Skill) => s.instructions).filter(Boolean).join("\n\n");
   const notes = storage.getNotes();
   const tasks = storage.getTasks().filter((t: any) => t.status !== "archived");
@@ -479,7 +481,7 @@ function buildSystemPrompt(storage: FileStorage, vaultSettings?: VaultSettings, 
   
   const mcpStatus = mcpStatusParts.length > 0
     ? mcpStatusParts.join("\n\n")
-    : "No MCP servers connected. The user can add servers in Settings > General > MCP Servers.";
+    : "No MCP servers connected. The user can add servers in Settings > MCP Servers.";
 
   return `You are Cortex, a personal AI operating system assistant. You are a reasoner, planner, and note-taker.
 
@@ -624,7 +626,7 @@ export class Agent {
     this.storage.addChatEvent(this.sessionId, event);
   }
 
-  async run(userMessage: string, images?: Array<{ url: string; mediaType: string }>): Promise<void> {
+  async run(userMessage: string, images?: Array<{ url: string; mediaType: string }>, forcedSkillNames?: string[]): Promise<void> {
     // Build display text (shown in UI)
     const displayParts: string[] = [];
     if (images && images.length > 0) {
@@ -678,7 +680,7 @@ export class Agent {
       return;
     }
 
-    let systemPrompt = buildSystemPrompt(this.storage, this.vaultSettings, this.agentSettings, effectiveMessage, this.context);
+    let systemPrompt = buildSystemPrompt(this.storage, this.vaultSettings, this.agentSettings, effectiveMessage, this.context, forcedSkillNames);
 
     // Inject context items into system prompt
     if (this.context.length > 0) {

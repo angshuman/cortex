@@ -710,9 +710,10 @@ export function registerRoutes(server: Server, app: Express) {
           broadcast({ type: "status", content: "thinking" });
 
           const images: Array<{ url: string; mediaType: string }> | undefined = data.images;
+          const pinnedSkills: string[] = data.pinnedSkills || [];
 
           try {
-            await agent.run(data.message || "", images);
+            await agent.run(data.message || "", images, pinnedSkills);
           } catch (err: any) {
             broadcast({ type: "error", content: err.message });
           } finally {

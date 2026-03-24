@@ -24,10 +24,12 @@ import {
   Image as ImageIcon,
   X,
   Paperclip,
+  Check,
 } from "lucide-react";
 import { marked } from "@/lib/marked-config";
 import { useImagePaste } from "@/hooks/use-image-paste";
 import { AttachMenu } from "@/components/attach-menu";
+import type { Skill } from "@shared/schema";
 
 interface ChatEvent {
   id: string;
@@ -45,11 +47,14 @@ export default function ChatPage() {
   const [input, setInput] = useState("");
   const [status, setStatus] = useState<"idle" | "thinking" | "done">("idle");
   const [expandedTools, setExpandedTools] = useState<Set<string>>(new Set());
+  const [pinnedSkills, setPinnedSkills] = useState<string[]>([]);
+  const [showSkillsPicker, setShowSkillsPicker] = useState(false);
   const wsRef = useRef<WebSocket | null>(null);
   const pendingMessageRef = useRef<string | null>(null);
   const scrollRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLTextAreaElement>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
+  const skillsPickerRef = useRef<HTMLDivElement>(null);
   const queryClient = useQueryClient();
   const { vaultParam, vaultId, activeVault } = useVault();
   const {
@@ -57,6 +62,15 @@ export default function ChatPage() {
     addImage, removeImage, clearImages, handlePaste, handleDrop, handleDragOver,
   } = useImagePaste(vaultParam);
   const [isDragging, setIsDragging] = useState(false);
+
+  // Skills
+  const { data: skills = [] } = useQuery<Skill[]>({
+    queryKey: ["/api/skills", vaultId],
+    queryFn: () => apiRequest("GET", withVault("/api/skills", vaultParam)).then(r => r.json()),
+    enabled: !!vaultId,
+  });
+  const alwaysOnSkills = skills.filter(s => s.enabled && (s.priority ?? 1) === 0);
+  const toggleableSkills = skills.filter(s => s.enabled && (s.priority ?? 1) > 0);
 
   // Load existing session
   const { data: session } = useQuery({
@@ -142,6 +156,7 @@ export default function ChatPage() {
 
     const payload: any = { type: "chat", message: msg, vaultId };
     if (images) payload.images = images;
+    if (pinnedSkills.length > 0) payload.pinnedSkills = pinnedSkills;
 
     let targetSessionId = sessionId;
     if (!targetSessionId) {
@@ -168,7 +183,7 @@ export default function ChatPage() {
       pendingMessageRef.current = message;
       setStatus("thinking");
     }
-  }, [input, sessionId, status, setLocation, vaultId, vaultParam, uploadedImages, isUploading, clearImages]);
+  }, [input, sessionId, status, setLocation, vaultId, vaultParam, uploadedImages, isUploading, clearImages, pinnedSkills]);
 
   const handleKeyDown = (e: React.KeyboardEvent) => {
     if (e.key === "Enter" && !e.shiftKey) {
@@ -429,6 +444,56 @@ export default function ChatPage() {
               ))}
             </div>
           )}
+          {/* Skills picker panel */}
+          {showSkillsPicker && (
+            <div ref={skillsPickerRef} className="mb-2 bg-background border border-border/50 rounded-xl p-3 shadow-lg">
+              <div className="flex items-center justify-between mb-2">
+                <span className="text-xs font-medium flex items-center gap-1.5">
+                  <Sparkles className="w-3 h-3 text-primary" />
+                  Active Skills
+                </span>
+                <Button size="sm" variant="ghost" className="h-5 text-[10px] px-2" onClick={() => setShowSkillsPicker(false)}>Done</Button>
+              </div>
+              <div className="space-y-0.5 max-h-52 overflow-y-auto">
+                {alwaysOnSkills.length > 0 && (
+                  <div className="mb-1.5">
+                    <p className="text-[9px] text-muted-foreground uppercase tracking-wider mb-1 px-1">Always active</p>
+                    {alwaysOnSkills.map(skill => (
+                      <div key={skill.name} className="flex items-center gap-2 py-1 px-2 rounded-lg opacity-60">
+                        <div className="w-3 h-3 rounded bg-primary/20 flex items-center justify-center shrink-0">
+                          <Check className="w-2 h-2 text-primary" />
+                        </div>
+                        <span className="text-xs">{skill.name}</span>
+                        <span className="text-[9px] text-muted-foreground ml-auto truncate max-w-[120px]">{skill.description}</span>
+                      </div>
+                    ))}
+                  </div>
+                )}
+                {toggleableSkills.length > 0 && (
+                  <div>
+                    <p className="text-[9px] text-muted-foreground uppercase tracking-wider mb-1 px-1">Pin to activate</p>
+                    {toggleableSkills.map(skill => {
+                      const isPinned = pinnedSkills.includes(skill.name);
+                      return (
+                        <button
+                          key={skill.name}
+                          className={`w-full flex items-center gap-2 py-1 px-2 rounded-lg text-left transition-colors ${isPinned ? "bg-primary/10" : "hover:bg-muted/50"}`}
+                          onClick={() => setPinnedSkills(prev => isPinned ? prev.filter(n => n !== skill.name) : [...prev, skill.name])}
+                        >
+                          <div className={`w-3 h-3 rounded border flex items-center justify-center shrink-0 ${isPinned ? "bg-primary border-primary" : "border-border"}`}>
+                            {isPinned && <Check className="w-2 h-2 text-primary-foreground" />}
+                          </div>
+                          <span className="text-xs">{skill.name}</span>
+                          <span className="text-[9px] text-muted-foreground ml-auto truncate max-w-[120px]">{skill.description}</span>
+                        </button>
+                      );
+                    })}
+                  </div>
+                )}
+              </div>
+            </div>
+          )}
+
           <div className="relative bg-muted/30 rounded-2xl border border-border/40 transition-colors">
             <input
               ref={fileInputRef}
@@ -460,10 +525,22 @@ export default function ChatPage() {
               data-testid="input-chat"
             />
             <div className="flex items-center justify-between px-3 py-2">
-              <AttachMenu
-                onUploadFile={() => fileInputRef.current?.click()}
-                size="md"
-              />
+              <div className="flex items-center gap-1">
+                <AttachMenu
+                  onUploadFile={() => fileInputRef.current?.click()}
+                  size="md"
+                />
+                <Button
+                  size="sm"
+                  variant="ghost"
+                  className={`h-7 px-2 gap-1 text-xs rounded-full ${(showSkillsPicker || pinnedSkills.length > 0) ? "text-primary bg-primary/10" : "text-muted-foreground"}`}
+                  onClick={() => setShowSkillsPicker(v => !v)}
+                  title="Manage active skills"
+                >
+                  <Sparkles className="w-3.5 h-3.5" />
+                  {pinnedSkills.length > 0 && <span className="text-[10px] font-medium">+{pinnedSkills.length}</span>}
+                </Button>
+              </div>
               <Button
                 size="icon"
                 className="h-7 w-7 rounded-full bg-foreground/80 hover:bg-foreground text-background disabled:opacity-30 disabled:bg-muted-foreground/30"
