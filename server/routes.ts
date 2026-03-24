@@ -667,7 +667,7 @@ export function registerRoutes(server: Server, app: Express) {
           }
         }
 
-        if (data.type === "chat" && data.sessionId && (data.message || data.images)) {
+        if (data.type === "chat" && data.sessionId && (data.message || data.images || data.files)) {
           const sessionId = data.sessionId;
           const vaultId = data.vaultId; // Frontend sends active vault ID
           currentSessionId = sessionId;
@@ -727,8 +727,10 @@ export function registerRoutes(server: Server, app: Express) {
           const pinnedSkills: string[] = data.pinnedSkills || [];
 
           try {
+            console.log(`[Agent] Starting: session=${sessionId}, msg="${(data.message || "").slice(0, 50)}", images=${images?.length || 0}, files=${attachedFiles.length}, context=${context.length}`);
             await agent.run(data.message || "", images, pinnedSkills);
           } catch (err: any) {
+            console.error(`[Agent] Error in session ${sessionId}:`, err.message);
             broadcast({ type: "error", content: err.message });
           } finally {
             broadcast({ type: "status", content: "done" });
