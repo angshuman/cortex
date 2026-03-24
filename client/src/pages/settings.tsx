@@ -2,6 +2,7 @@ import { useState, useEffect } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { apiRequest, withVault } from "@/lib/queryClient";
 import { useVault, type Vault, type VaultSettings } from "@/hooks/use-vault";
+import cortexIcon from "@/assets/cortex-icon.png";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Badge } from "@/components/ui/badge";
@@ -164,13 +165,22 @@ export default function SettingsPage() {
 
       <ScrollArea className="flex-1">
         <div className="max-w-2xl mx-auto px-4 py-6">
-          <Tabs defaultValue="vaults">
+          <Tabs defaultValue="mcp">
             <TabsList className="mb-6">
+              <TabsTrigger value="mcp" className="text-xs">MCP Servers</TabsTrigger>
               <TabsTrigger value="vaults" className="text-xs">Vaults</TabsTrigger>
               <TabsTrigger value="general" className="text-xs">General</TabsTrigger>
               <TabsTrigger value="skills" className="text-xs">Skills</TabsTrigger>
               <TabsTrigger value="about" className="text-xs">About</TabsTrigger>
             </TabsList>
+
+            {/* ====== MCP SERVERS TAB ====== */}
+            <TabsContent value="mcp" className="space-y-4">
+              <p className="text-xs text-muted-foreground mb-2">
+                MCP servers extend the AI agent with new capabilities — browser automation, file access, web search, and more. Connect popular servers below or add a custom one.
+              </p>
+              <McpServersCard config={config} updateConfig={updateConfig} />
+            </TabsContent>
 
             {/* ====== VAULTS TAB ====== */}
             <TabsContent value="vaults" className="space-y-4">
@@ -247,9 +257,6 @@ export default function SettingsPage() {
                   </Select>
                 </div>
               </Card>
-
-              {/* MCP Servers */}
-              <McpServersCard config={config} updateConfig={updateConfig} />
 
               {/* Storage */}
               <Card className="p-4">
@@ -407,8 +414,8 @@ export default function SettingsPage() {
             <TabsContent value="about" className="space-y-4">
               <Card className="p-4">
                 <div className="flex items-center gap-3 mb-3">
-                  <div className="w-10 h-10 rounded-xl bg-primary/10 flex items-center justify-center">
-                    <Brain className="w-5 h-5 text-primary" />
+                  <div className="w-10 h-10 rounded-xl bg-muted/40 flex items-center justify-center">
+                    <img src={cortexIcon} alt="Cortex" className="w-7 h-7" />
                   </div>
                   <div>
                     <h3 className="text-sm font-semibold">Cortex</h3>

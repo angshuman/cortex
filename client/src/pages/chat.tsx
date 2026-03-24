@@ -8,6 +8,7 @@ import { Textarea } from "@/components/ui/textarea";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { Badge } from "@/components/ui/badge";
 import { SidebarTrigger } from "@/components/ui/sidebar";
+import cortexIcon from "@/assets/cortex-icon.png";
 import {
   Send,
   Brain,
@@ -335,7 +336,7 @@ export default function ChatPage() {
         <div className="flex-1 flex items-center justify-center">
           <div className="text-center max-w-md">
             <div className="w-16 h-16 rounded-2xl bg-muted/40 flex items-center justify-center mx-auto mb-4">
-              <Brain className="w-8 h-8 text-muted-foreground" />
+              <img src={cortexIcon} alt="Cortex" className="w-10 h-10" />
             </div>
             <h2 className="text-lg font-semibold mb-2">Cortex</h2>
             <p className="text-sm text-muted-foreground mb-6">Your personal AI operating system. Ask me anything, create notes, manage tasks, or browse the web.</p>
@@ -372,7 +373,7 @@ export default function ChatPage() {
             <div className="flex items-center justify-center h-full min-h-[300px]">
               <div className="text-center">
                 <div className="w-12 h-12 rounded-xl bg-muted/40 flex items-center justify-center mx-auto mb-3">
-                  <Brain className="w-6 h-6 text-muted-foreground" />
+                  <img src={cortexIcon} alt="Cortex" className="w-7 h-7" />
                 </div>
                 <p className="text-sm text-muted-foreground">Send a message to start</p>
               </div>
