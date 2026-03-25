@@ -573,7 +573,7 @@ ${taskSummary}
 ${notesSummary}
 
 ## How You Think
-You are an autonomous agent with up to 50 reasoning steps available. Use them.
+You are an autonomous agent. You can take as many reasoning steps as needed to complete a task thoroughly. There is no step limit — keep working until you're done.
 
 ### For complex tasks (specs, research, analysis, design):
 1. **Plan comprehensively**: Break the work into concrete steps. For a spec, that means: research existing solutions, identify requirements, design the format, write examples, handle edge cases, and produce a complete document.
@@ -597,7 +597,7 @@ ${skillInstructions}${agentSettings?.systemPromptSuffix ? `\n\n## Custom Instruc
 // ContextItem is defined above selectRelevantSkills
 
 const defaultAgentSettings: AgentSettings = {
-  maxTurns: 50,
+  maxTurns: 200,  // Safety cap only — agent stops naturally when LLM stops calling tools
   maxTokens: 16384,
   temperature: 0.7,
   fetchTimeout: 30000,
@@ -619,7 +619,10 @@ export class Agent {
     this.onEvent = onEvent;
     this.context = context || [];
     this.vaultSettings = vaultSettings || { folderPath: null, browserHeadless: false, aiModel: null };
-    this.agentSettings = agentSettings || defaultAgentSettings;
+    // Merge saved config with defaults — ensures old saved values (e.g. maxTurns:10) don't cap the agent
+    this.agentSettings = { ...defaultAgentSettings, ...(agentSettings || {}) };
+    // Override maxTurns if it's the old default — users who never changed it shouldn't be stuck at 10
+    if (this.agentSettings.maxTurns <= 50) this.agentSettings.maxTurns = 200;
     // Use provided vault-scoped storage, or import the default
     this.storage = storage || require("./storage").storage;
     // Rebuild conversation history from persisted session events
@@ -796,7 +799,11 @@ export class Agent {
     while (step < maxTurns) {
       step++;
       const msgs = messagesToClaude(this.messages, this.storage);
-      this.emit("thought", `Reasoning... (step ${step}/${maxTurns})`);
+      if (step === 1) {
+        this.emit("thought", "Thinking...");
+      } else {
+        this.emit("thought", `Working... (step ${step})`);
+      }
 
       const response = await client.messages.create({
         model,
@@ -880,7 +887,11 @@ export class Agent {
     const maxTurns = this.agentSettings.maxTurns;
     while (step < maxTurns) {
       step++;
-      this.emit("thought", `Reasoning... (step ${step}/${maxTurns})`);
+      if (step === 1) {
+        this.emit("thought", "Thinking...");
+      } else {
+        this.emit("thought", `Working... (step ${step})`);
+      }
 
       const response = await client.chat.completions.create({
         model,
