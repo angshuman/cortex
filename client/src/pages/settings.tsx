@@ -627,8 +627,8 @@ function AgentSettingsCard({
   updateConfig: any;
 }) {
   const agent = config?.agent || {};
-  const [maxTurns, setMaxTurns] = useState(String(agent.maxTurns ?? 10));
-  const [maxTokens, setMaxTokens] = useState(String(agent.maxTokens ?? 4096));
+  const [maxTurns, setMaxTurns] = useState(String(agent.maxTurns ?? 50));
+  const [maxTokens, setMaxTokens] = useState(String(agent.maxTokens ?? 16384));
   const [temperature, setTemperature] = useState(String(agent.temperature ?? 0.7));
   const [fetchTimeout, setFetchTimeout] = useState(String(agent.fetchTimeout ?? 15000));
   const [fetchMaxLength, setFetchMaxLength] = useState(String(agent.fetchMaxLength ?? 15000));
@@ -637,8 +637,8 @@ function AgentSettingsCard({
   // Sync when config changes externally
   useEffect(() => {
     const a = config?.agent || {};
-    setMaxTurns(String(a.maxTurns ?? 10));
-    setMaxTokens(String(a.maxTokens ?? 4096));
+    setMaxTurns(String(a.maxTurns ?? 50));
+    setMaxTokens(String(a.maxTokens ?? 16384));
     setTemperature(String(a.temperature ?? 0.7));
     setFetchTimeout(String(a.fetchTimeout ?? 15000));
     setFetchMaxLength(String(a.fetchMaxLength ?? 15000));

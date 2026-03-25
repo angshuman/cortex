@@ -263,21 +263,45 @@ async function executeTool(name: string, args: Record<string, any>, storage: Fil
       case "web_search": {
         const query = args.query || "";
         try {
-          // Use HackerNews Algolia API as a built-in search source
-          const searchUrl = `https://hn.algolia.com/api/v1/search?query=${encodeURIComponent(query)}&tags=story&hitsPerPage=10`;
-          const resp = await fetch(searchUrl);
+          // Use DuckDuckGo HTML search for broad web results
+          const searchUrl = `https://html.duckduckgo.com/html/?q=${encodeURIComponent(query)}`;
+          const resp = await fetch(searchUrl, {
+            headers: { "User-Agent": "Cortex/2.0 (search assistant)" },
+            signal: AbortSignal.timeout(15000),
+          });
           if (!resp.ok) throw new Error(`Search failed: ${resp.status}`);
-          const data = await resp.json() as any;
-          const results = (data.hits || []).map((h: any) => ({
-            title: h.title,
-            url: h.url || `https://news.ycombinator.com/item?id=${h.objectID}`,
-            points: h.points,
-            author: h.author,
-            date: h.created_at,
-            comments: h.num_comments,
-            hnUrl: `https://news.ycombinator.com/item?id=${h.objectID}`,
-          }));
-          return JSON.stringify({ source: "Hacker News", results });
+          const html = await resp.text();
+          // Extract search results from DDG HTML
+          const results: Array<{ title: string; url: string; snippet: string }> = [];
+          const resultRegex = /<a[^>]+class="result__a"[^>]*href="([^"]+)"[^>]*>(.*?)<\/a>[\s\S]*?<a[^>]+class="result__snippet"[^>]*>(.*?)<\/a>/gi;
+          let m;
+          while ((m = resultRegex.exec(html)) !== null && results.length < 10) {
+            const rawUrl = m[1];
+            // DDG wraps URLs in a redirect — extract the actual URL
+            const urlMatch = rawUrl.match(/uddg=([^&]+)/);
+            const url = urlMatch ? decodeURIComponent(urlMatch[1]) : rawUrl;
+            results.push({
+              title: m[2].replace(/<[^>]+>/g, "").trim(),
+              url,
+              snippet: m[3].replace(/<[^>]+>/g, "").trim(),
+            });
+          }
+          if (results.length === 0) {
+            // Fallback: try HackerNews for tech queries
+            const hnUrl = `https://hn.algolia.com/api/v1/search?query=${encodeURIComponent(query)}&tags=story&hitsPerPage=8`;
+            const hnResp = await fetch(hnUrl, { signal: AbortSignal.timeout(10000) });
+            if (hnResp.ok) {
+              const hnData = await hnResp.json() as any;
+              for (const h of (hnData.hits || [])) {
+                results.push({
+                  title: h.title,
+                  url: h.url || `https://news.ycombinator.com/item?id=${h.objectID}`,
+                  snippet: `${h.points} points, ${h.num_comments} comments on HN`,
+                });
+              }
+            }
+          }
+          return JSON.stringify({ query, results });
         } catch (err: any) {
           return JSON.stringify({ error: `Search failed: ${err.message}` });
         }
@@ -549,14 +573,21 @@ ${taskSummary}
 ${notesSummary}
 
 ## How You Think
-You are an autonomous agent. When given a request:
-1. **Plan first**: Think about the full scope of what's needed. For research or exploration tasks, identify ALL the steps required upfront.
-2. **Execute thoroughly**: Use your tools in sequence to complete every step of your plan. Do NOT stop after one tool call if the task requires more.
-3. **Chain tool calls**: If a tool result reveals new information or links to follow, continue investigating. For example, if you browse a page and see "Learn More" links the user wants explored, click each one and gather that information.
-4. **Only summarize when truly done**: Do NOT generate a final text response until you have completed ALL steps. If you still have tools to call or links to visit, call the next tool instead of writing a summary.
-5. **Be proactive**: If the user asks for "more details" or "deeper" investigation, that means you should exhaustively explore — follow every relevant link, extract all available information, and compile comprehensive results.
+You are an autonomous agent with up to 50 reasoning steps available. Use them.
 
-IMPORTANT: Do NOT ask "Would you like me to..." when the user's intent is clear. If they asked you to investigate something deeply, just do it. Use all available turns to gather information rather than stopping early to ask permission.
+### For complex tasks (specs, research, analysis, design):
+1. **Plan comprehensively**: Break the work into concrete steps. For a spec, that means: research existing solutions, identify requirements, design the format, write examples, handle edge cases, and produce a complete document.
+2. **Research first**: Use web_search and web_fetch to study existing solutions, standards, and prior art. Read multiple sources. Don't rely on memory alone — verify and expand your knowledge.
+3. **Build incrementally**: Write sections piece by piece. Use create_note or update_note to build up the document as you go, rather than trying to produce everything in one shot.
+4. **Be thorough**: A spec should be implementable. A research report should cite sources. An analysis should consider alternatives. Don't stop at surface level.
+5. **Think about what's missing**: After your first draft, ask yourself what a reader would still need to know. Add those sections.
+
+### For all tasks:
+1. **Execute, don't ask**: If the user's intent is clear, do the work. Don't ask "Would you like me to..." — just do it.
+2. **Chain tool calls**: If a search reveals interesting links, fetch them. If one source is insufficient, search for more.
+3. **Only summarize when truly done**: Do NOT generate a final text response until you have completed ALL steps. If you still have tools to call, call them.
+4. **Use notes as workspace**: For large outputs, create a note with the full content so the user can reference it later. Don't just dump everything in a chat message.
+5. **Quality over speed**: It's better to take 20 steps and produce an excellent result than to take 3 steps and produce something shallow.
 
 Always use markdown formatting in responses.
 
@@ -566,11 +597,11 @@ ${skillInstructions}${agentSettings?.systemPromptSuffix ? `\n\n## Custom Instruc
 // ContextItem is defined above selectRelevantSkills
 
 const defaultAgentSettings: AgentSettings = {
-  maxTurns: 10,
-  maxTokens: 4096,
+  maxTurns: 50,
+  maxTokens: 16384,
   temperature: 0.7,
-  fetchTimeout: 15000,
-  fetchMaxLength: 15000,
+  fetchTimeout: 30000,
+  fetchMaxLength: 50000,
   systemPromptSuffix: "",
 };
 

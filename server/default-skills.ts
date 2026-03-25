@@ -186,7 +186,7 @@ You control a real browser via Playwright MCP. Follow these patterns for reliabl
   {
     name: "web-search",
     description: "Search the web and fetch URLs",
-    version: "2.0.0",
+    version: "3.0.0",
     category: "research",
     priority: 0,
     triggerKeywords: [],
@@ -215,7 +215,7 @@ You can search Hacker News and fetch any public URL.
 3. Synthesize information across sources
 4. Create a note with findings if the user wants to save the research`,
     tools: [
-      { name: "web_search", description: "Search Hacker News stories by keyword", parameters: [
+      { name: "web_search", description: "Search the web using DuckDuckGo. Returns titles, URLs, and snippets from web results.", parameters: [
         { name: "query", type: "string", description: "Search query", required: true },
       ]},
       { name: "web_fetch", description: "Fetch a URL and return its contents (JSON APIs, web pages, etc.)", parameters: [
