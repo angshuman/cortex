@@ -29,6 +29,7 @@ import {
 } from "lucide-react";
 import { marked } from "@/lib/marked-config";
 import { useImagePaste } from "@/hooks/use-image-paste";
+import { AttachMenu } from "@/components/attach-menu";
 import { LoopDebugger } from "@/components/loop-debugger";
 import type { Skill } from "@shared/schema";
 
