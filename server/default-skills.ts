@@ -196,29 +196,24 @@ You control a real browser via Playwright MCP. Follow these patterns for reliabl
     filePath: null,
     instructions: `## Web Search & Fetch
 
-You can search Hacker News and fetch any public URL.
+You can search the web and navigate URLs.
 
-### Search Strategy
-- Use web_search for discovering content, trends, and discussions
-- Use web_fetch to retrieve specific URLs, APIs, or pages
-- For news/tech topics, Hacker News is great. For other topics, combine with browser_navigate to search engines
-
-### Fetching Pages
-- When fetching a page, if the content is HTML, extract the useful text and summarize
-- For API endpoints, parse the JSON and present key data
-- If a fetch fails (timeout, 403), try the browser tools instead — they can handle JavaScript-rendered pages
-- Large responses get truncated — mention this if the user needs the full content
+### Tool Priority
+1. **web_search** — always start here to discover sources
+2. **browser_navigate + browser_snapshot** — preferred for reading pages (handles JavaScript, paywalls, dynamic content)
+3. **web_fetch** — fallback only; frequently blocked or returns empty/truncated HTML. Use only when browser is unavailable.
 
 ### Research Workflow
 1. Start with web_search to find relevant sources
-2. Use web_fetch to read promising URLs
-3. Synthesize information across sources
-4. Create a note with findings if the user wants to save the research`,
+2. Use browser_navigate to open promising URLs, then browser_snapshot to read the content
+3. If browser is not connected, fall back to web_fetch
+4. Synthesize information across sources
+5. Create a note with findings if the user wants to save the research`,
     tools: [
       { name: "web_search", description: "Search the web using DuckDuckGo. Returns titles, URLs, and snippets from web results.", parameters: [
         { name: "query", type: "string", description: "Search query", required: true },
       ]},
-      { name: "web_fetch", description: "Fetch a URL and return its contents (JSON APIs, web pages, etc.)", parameters: [
+      { name: "web_fetch", description: "⚠️ Fallback only — frequently blocked. Prefer browser_navigate+browser_snapshot when available. Fetches a URL and returns its raw contents.", parameters: [
         { name: "url", type: "string", description: "URL to fetch", required: true },
       ]},
     ],
@@ -245,7 +240,7 @@ When the user asks you to research a topic in depth:
 3. Plan your research order — start broad, then go deep on relevant areas
 
 ### Execution Phase
-- Use ALL available tools: web_search for discovery, web_fetch for specific pages, browser tools for interactive sites
+- Use ALL available tools: web_search for discovery, browser_navigate+browser_snapshot for reading pages, web_fetch only as fallback when browser is unavailable
 - Follow leads — if a search result mentions an important source, fetch or browse it
 - Take notes as you go using create_note — don't try to hold everything in memory
 - When you find conflicting information, note both perspectives and their sources
