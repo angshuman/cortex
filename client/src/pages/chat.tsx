@@ -139,15 +139,16 @@ export default function ChatPage() {
     };
 
     ws.onerror = () => {
-      // Clear any pending message if the connection fails
-      if (pendingMessageRef.current) {
-        pendingMessageRef.current = null;
-        setStatus("idle");
-      }
+      pendingMessageRef.current = null;
+      setStatus("idle");
     };
 
     ws.onclose = () => {
       wsRef.current = null;
+      // If the connection drops while the agent is running, recover:
+      // reset status and let the session query reload the final state from the server.
+      setStatus(s => s === "thinking" ? "idle" : s);
+      hasLiveEventsRef.current = false;
     };
 
     return () => {

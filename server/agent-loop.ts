@@ -67,6 +67,7 @@ async function runClaude(
     : agentSettings.maxTokens;
 
   let step = 0;
+  let loopCompleted = false;
   while (step < agentSettings.maxTurns) {
     step++;
 
@@ -141,7 +142,12 @@ async function runClaude(
       emit("message", textContent, { role: "assistant" });
       messages.push({ role: "assistant", content: textContent });
     }
+    loopCompleted = true;
     break;
+  }
+
+  if (!loopCompleted) {
+    emit("message", "*(Reached the maximum number of steps. The task may be incomplete.)*", { role: "assistant" });
   }
 }
 
@@ -179,6 +185,7 @@ async function runOpenAI(
   const openaiMessages: any[] = messagesToOpenAI(messages, systemPrompt, storage);
 
   let step = 0;
+  let loopCompleted = false;
   while (step < agentSettings.maxTurns) {
     step++;
     emit("thought", step === 1 ? "Thinking..." : `Working... (step ${step})`);
@@ -225,6 +232,11 @@ async function runOpenAI(
       messages.push({ role: "assistant", content: msg.content });
       openaiMessages.push({ role: "assistant", content: msg.content });
     }
+    loopCompleted = true;
     break;
+  }
+
+  if (!loopCompleted) {
+    emit("message", "*(Reached the maximum number of steps. The task may be incomplete.)*", { role: "assistant" });
   }
 }

@@ -87,7 +87,7 @@ function parseRuns(events: ChatEvent[]): Run[] {
     }
   }
 
-  return runs.filter(r => r.turns.length > 0 || r.intent);
+  return runs.filter(r => r.userMessage.length > 0);
 }
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
@@ -226,7 +226,22 @@ function RunView({ run }: { run: Run }) {
           ))}
         </div>
       ) : (
-        <p className="text-xs text-muted-foreground px-3 py-2">No tool calls in this run.</p>
+        /* No tool calls — show the direct response */
+        <div className="rounded-md border border-border/50 overflow-hidden">
+          <div className="flex items-start gap-3 px-3 py-2.5">
+            <span className="shrink-0 mt-0.5 w-5 h-5 rounded-full bg-muted/60 border border-border/60 flex items-center justify-center text-[10px] font-bold text-muted-foreground">1</span>
+            <div className="flex-1 min-w-0 space-y-1">
+              <div className="flex items-center gap-2">
+                <span className="shrink-0 text-[9px] font-semibold tracking-widest text-emerald-500/80 uppercase w-10">obs</span>
+                <span className="text-xs text-muted-foreground truncate">
+                  {run.finalResponse
+                    ? truncate(run.finalResponse.split("\n").find(l => l.trim()) || run.finalResponse, 72)
+                    : run.isComplete ? "Response sent" : "Waiting…"}
+                </span>
+              </div>
+            </div>
+          </div>
+        </div>
       )}
 
       {/* Footer */}
@@ -237,8 +252,9 @@ function RunView({ run }: { run: Run }) {
           <Zap className="w-3 h-3 text-amber-500/60 shrink-0 animate-pulse" />
         )}
         <span className="text-[11px] text-muted-foreground">
-          {run.isComplete ? "Completed" : "In progress"} · {run.turns.length} tool call{run.turns.length !== 1 ? "s" : ""}
-          {run.finalResponse && ` · ${(run.finalResponse.length / 1000).toFixed(1)}k chars response`}
+          {run.isComplete ? "Completed" : "In progress"}
+          {run.turns.length > 0 && ` · ${run.turns.length} tool call${run.turns.length !== 1 ? "s" : ""}`}
+          {run.finalResponse && ` · ${(run.finalResponse.length / 1000).toFixed(1)}k chars`}
         </span>
       </div>
     </div>
