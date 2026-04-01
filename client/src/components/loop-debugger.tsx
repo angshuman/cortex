@@ -253,25 +253,26 @@ export function LoopDebugger({ events }: { events: ChatEvent[] }) {
 
   const runs = useMemo(() => parseRuns(events), [events]);
 
-  // Keep runIdx pointing at the latest run when new runs appear
-  const latestIdx = runs.length - 1;
+  const latestIdx = Math.max(0, runs.length - 1);
   const activeIdx = Math.min(runIdx === 0 && latestIdx > 0 ? latestIdx : runIdx, latestIdx);
-
-  if (runs.length === 0) return null;
-
-  const run = runs[activeIdx];
   const totalTurns = runs.reduce((s, r) => s + r.turns.length, 0);
+  const hasRuns = runs.length > 0;
+  const run = runs[activeIdx];
 
   return (
     <>
-      {/* Trigger button */}
+      {/* Trigger button — always visible, dimmed when no data yet */}
       <button
-        onClick={() => { setOpen(true); setRunIdx(latestIdx); }}
-        title="Loop inspector"
-        className="flex items-center gap-1.5 px-2 py-1 rounded-md text-xs text-muted-foreground hover:text-foreground hover:bg-muted/40 transition-colors border border-border/40 hover:border-border/70"
+        onClick={() => { if (hasRuns) { setOpen(true); setRunIdx(latestIdx); } }}
+        title={hasRuns ? "Loop inspector" : "Loop inspector (no tool calls yet)"}
+        className={`flex items-center gap-1.5 px-2 py-1 rounded-md text-xs border transition-colors
+          ${hasRuns
+            ? "text-muted-foreground hover:text-foreground hover:bg-muted/40 border-border/40 hover:border-border/70 cursor-pointer"
+            : "text-muted-foreground/30 border-border/20 cursor-default"
+          }`}
       >
         <Activity className="w-3 h-3" />
-        <span>{totalTurns}</span>
+        <span>{hasRuns ? totalTurns : "–"}</span>
       </button>
 
       {/* Backdrop */}
