@@ -30,12 +30,31 @@ export const insertVaultSchema = z.object({
 });
 export type InsertVault = z.infer<typeof insertVaultSchema>;
 
+// ============ NOTE GROUPS ============
+export const noteGroupSchema = z.object({
+  id: z.string(),
+  name: z.string(),
+  icon: z.string().default("📁"),
+  color: z.string().default("#6366f1"),
+  isDefault: z.boolean().default(false),
+  createdAt: z.string(),
+  updatedAt: z.string(),
+});
+export type NoteGroup = z.infer<typeof noteGroupSchema>;
+export const insertNoteGroupSchema = z.object({
+  name: z.string(),
+  icon: z.string().optional(),
+  color: z.string().optional(),
+});
+export type InsertNoteGroup = z.infer<typeof insertNoteGroupSchema>;
+
 // ============ NOTES ============
 export const noteSchema = z.object({
   id: z.string(),
   title: z.string(),
   content: z.string(),
   folder: z.string().default("/"),
+  groupId: z.string().default("default"),
   tags: z.array(z.string()).default([]),
   attachments: z.array(z.string()).default([]),
   createdAt: z.string(),
@@ -47,6 +66,7 @@ export const insertNoteSchema = z.object({
   title: z.string(),
   content: z.string(),
   folder: z.string().optional(),
+  groupId: z.string().optional(),
   tags: z.array(z.string()).optional(),
   attachments: z.array(z.string()).optional(),
   pinned: z.boolean().optional(),
@@ -103,6 +123,8 @@ export const chatSessionSchema = z.object({
   updatedAt: z.string(),
   model: z.string().optional(),
   tokenUsage: z.object({ input: z.number(), output: z.number() }).optional(),
+  /** Input tokens of the most recent LLM call — tracks how full the context window is. */
+  contextTokens: z.number().optional(),
 });
 export type ChatSession = z.infer<typeof chatSessionSchema>;
 

@@ -60,6 +60,11 @@ import {
   FolderOpen,
   Tag,
   ChevronRight,
+  CheckSquare,
+  Square,
+  Check,
+  Pencil,
+  ChevronDown,
 } from "lucide-react";
 import { ContextChat, type ContextItem } from "@/components/context-chat";
 import { ResizeHandle, useResizablePanel } from "@/components/resize-handle";
@@ -72,9 +77,20 @@ interface Note {
   title: string;
   content: string;
   folder: string;
+  groupId: string;
   tags: string[];
   attachments: string[];
   pinned: boolean;
+  createdAt: string;
+  updatedAt: string;
+}
+
+interface NoteGroup {
+  id: string;
+  name: string;
+  icon: string;
+  color: string;
+  isDefault: boolean;
   createdAt: string;
   updatedAt: string;
 }
@@ -162,14 +178,16 @@ function NoteListItem({
   note,
   isSelected,
   isInContext,
-  onSelect,
-  onToggleContext,
+  selectMode,
+  isChecked,
+  onItemClick,
 }: {
   note: Note;
   isSelected: boolean;
   isInContext: boolean;
-  onSelect: () => void;
-  onToggleContext: () => void;
+  selectMode: boolean;
+  isChecked: boolean;
+  onItemClick: (e: React.MouseEvent) => void;
 }) {
   const previewText = useMemo(() => {
     return note.content
@@ -193,28 +211,29 @@ function NoteListItem({
 
   return (
     <button
-      onClick={(e) => {
-        if (e.ctrlKey || e.metaKey) {
-          e.preventDefault();
-          onToggleContext();
-        } else {
-          onSelect();
-        }
-      }}
-      className={`w-full text-left p-3 rounded-lg transition-colors ${
-        isSelected
+      onClick={onItemClick}
+      className={`w-full text-left p-3 rounded-lg transition-colors select-none ${
+        isChecked
+          ? "bg-primary/10 border border-primary/25"
+          : isSelected
           ? "bg-primary/8 border border-primary/15"
           : isInContext
           ? "bg-primary/5 border border-primary/10"
           : "hover:bg-muted/40 border border-transparent"
       }`}
       data-testid={`note-item-${note.id}`}
-      title={isInContext ? "Ctrl+Click to remove from context" : "Ctrl+Click to add to AI context"}
     >
       <div className="flex items-start gap-2">
+        {selectMode && (
+          <div className="shrink-0 mt-0.5">
+            {isChecked
+              ? <CheckSquare className="w-3.5 h-3.5 text-primary" />
+              : <Square className="w-3.5 h-3.5 text-muted-foreground/40" />}
+          </div>
+        )}
         <div className="flex-1 min-w-0">
           <div className="flex items-center gap-1.5 mb-0.5">
-            {isInContext && <MessageSquare className="w-2.5 h-2.5 text-primary shrink-0" />}
+            {isInContext && !selectMode && <MessageSquare className="w-2.5 h-2.5 text-primary shrink-0" />}
             {note.pinned && <Pin className="w-2.5 h-2.5 text-primary shrink-0" />}
             <span className="text-[13px] font-medium truncate text-foreground">{note.title}</span>
           </div>
@@ -251,6 +270,14 @@ export default function NotesPage() {
   const [editTitle, setEditTitle] = useState("");
   const [editContent, setEditContent] = useState("");
   const [searchQuery, setSearchQuery] = useState("");
+  const [activeGroupId, setActiveGroupId] = useState<string>("default");
+  const [selectMode, setSelectMode] = useState(false);
+  const [selectedNoteIds, setSelectedNoteIds] = useState<Set<string>>(new Set());
+  const [newGroupName, setNewGroupName] = useState("");
+  const [editingGroupId, setEditingGroupId] = useState<string | null>(null);
+  const [editingGroupName, setEditingGroupName] = useState("");
+  const lastCheckedIdxRef = useRef<number>(-1);
+  const filteredNotesRef = useRef<Note[]>([]);
 
   const [chatOpen, setChatOpen] = useState(true);
   const [viewMode, setViewMode] = useState<"edit" | "preview">("edit");
@@ -271,6 +298,13 @@ export default function NotesPage() {
     queryFn: () => apiRequest("GET", withVault("/api/notes", vaultParam)).then(r => r.json()),
     staleTime: 0,
     refetchOnMount: "always",
+    enabled: !!vaultId,
+  });
+
+  const { data: groups = [] } = useQuery<NoteGroup[]>({
+    queryKey: ["/api/note-groups", vaultId],
+    queryFn: () => apiRequest("GET", withVault("/api/note-groups", vaultParam)).then(r => r.json()),
+    staleTime: 0,
     enabled: !!vaultId,
   });
 
@@ -302,6 +336,41 @@ export default function NotesPage() {
       queryClient.invalidateQueries({ queryKey: ["/api/notes"] });
       setSelectedNote(null);
       setEditMode(false);
+    },
+  });
+
+  const bulkDeleteNotes = useMutation({
+    mutationFn: (ids: string[]) => apiRequest("DELETE", withVault("/api/notes", vaultParam), { ids }),
+    onSuccess: (_data, ids) => {
+      queryClient.invalidateQueries({ queryKey: ["/api/notes"] });
+      if (selectedNote && ids.includes(selectedNote.id)) { setSelectedNote(null); setEditMode(false); }
+      setSelectedNoteIds(new Set());
+      setSelectMode(false);
+      toast({ title: `Deleted ${ids.length} note${ids.length > 1 ? "s" : ""}` });
+    },
+  });
+
+  const createGroup = useMutation({
+    mutationFn: (data: { name: string }) => apiRequest("POST", withVault("/api/note-groups", vaultParam), data).then(r => r.json()),
+    onSuccess: (group) => {
+      queryClient.invalidateQueries({ queryKey: ["/api/note-groups"] });
+      setActiveGroupId(group.id);
+      setNewGroupName("");
+    },
+  });
+
+  const updateGroup = useMutation({
+    mutationFn: ({ id, ...data }: { id: string; name?: string; icon?: string }) =>
+      apiRequest("PATCH", withVault(`/api/note-groups/${id}`, vaultParam), data).then(r => r.json()),
+    onSuccess: () => queryClient.invalidateQueries({ queryKey: ["/api/note-groups"] }),
+  });
+
+  const deleteGroup = useMutation({
+    mutationFn: (id: string) => apiRequest("DELETE", withVault(`/api/note-groups/${id}`, vaultParam)),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["/api/note-groups"] });
+      queryClient.invalidateQueries({ queryKey: ["/api/notes"] });
+      setActiveGroupId("default");
     },
   });
 
@@ -368,10 +437,14 @@ export default function NotesPage() {
 
   const filteredNotes = useMemo(() =>
     notes
+      .filter(n => n.groupId === activeGroupId || (activeGroupId === "default" && !n.groupId))
       .filter(n => !searchQuery || n.title.toLowerCase().includes(searchQuery.toLowerCase()) || n.content.toLowerCase().includes(searchQuery.toLowerCase()))
       .sort((a, b) => (b.pinned ? 1 : 0) - (a.pinned ? 1 : 0) || new Date(b.updatedAt).getTime() - new Date(a.updatedAt).getTime()),
-    [notes, searchQuery]
+    [notes, searchQuery, activeGroupId]
   );
+
+  // Keep filteredNotesRef in sync for range-select
+  filteredNotesRef.current = filteredNotes;
 
   const selectNote = (note: Note) => {
     setSelectedNote(note);
@@ -405,6 +478,46 @@ export default function NotesPage() {
       return next;
     });
   }, []);
+
+  const handleNoteItemClick = useCallback((note: Note, idx: number, e: React.MouseEvent) => {
+    const isCtrl = e.ctrlKey || e.metaKey; // Ctrl on Win/Linux, Cmd on Mac
+    const isShift = e.shiftKey;
+
+    if (selectMode || isCtrl || isShift) {
+      e.preventDefault();
+      if (!selectMode) setSelectMode(true);
+
+      if (isShift && lastCheckedIdxRef.current >= 0) {
+        // Range select: fill from anchor to current index
+        const from = Math.min(lastCheckedIdxRef.current, idx);
+        const to = Math.max(lastCheckedIdxRef.current, idx);
+        const rangeIds = filteredNotesRef.current.slice(from, to + 1).map(n => n.id);
+        setSelectedNoteIds(prev => { const next = new Set(prev); rangeIds.forEach(id => next.add(id)); return next; });
+      } else {
+        // Ctrl/Cmd or plain click in selectMode: toggle individual
+        setSelectedNoteIds(prev => {
+          const next = new Set(prev);
+          if (next.has(note.id)) next.delete(note.id); else next.add(note.id);
+          return next;
+        });
+        lastCheckedIdxRef.current = idx;
+      }
+      return;
+    }
+
+    // Outside selectMode — Ctrl/Cmd adds to context; plain click opens note
+    if (isCtrl) { e.preventDefault(); toggleNoteContext(note.id); }
+    else { selectNote(note); }
+  }, [selectMode, toggleNoteContext, selectNote]);
+
+  const toggleSelectAll = useCallback(() => {
+    if (selectedNoteIds.size === filteredNotes.length) {
+      setSelectedNoteIds(new Set());
+    } else {
+      setSelectedNoteIds(new Set(filteredNotes.map(n => n.id)));
+      lastCheckedIdxRef.current = -1;
+    }
+  }, [filteredNotes, selectedNoteIds]);
 
   const handleAddContext = useCallback((item: ContextItem) => {
     if (item.id) {
@@ -469,29 +582,133 @@ export default function NotesPage() {
             const f = e.target.files?.[0];
             if (f) handleDump(undefined, f);
           }} />
-          <Button size="sm" variant="default" className="text-xs gap-1" onClick={() => createNote.mutate({ title: "Untitled", content: "" })} data-testid="button-new-note">
+          <Button size="sm" variant="default" className="text-xs gap-1" onClick={() => createNote.mutate({ title: "Untitled", content: "", groupId: activeGroupId })} data-testid="button-new-note">
             <Plus className="w-3.5 h-3.5" /> New Note
           </Button>
         </div>
       </header>
 
       <div className="flex-1 flex min-h-0">
-        {/* Sidebar: Folders + Note list */}
+        {/* Sidebar: Groups + Note list */}
         <div className="border-r border-border/50 flex flex-col shrink-0" style={{ width: noteList.width }}>
-          <div className="p-2 space-y-2">
-            {/* Search */}
-            <div className="relative">
-              <Search className="absolute left-2.5 top-1/2 -translate-y-1/2 w-3.5 h-3.5 text-muted-foreground/50" />
-              <Input
-                placeholder="Search notes..."
-                className="h-8 text-xs pl-8 bg-muted/30 border-border/30"
-                value={searchQuery}
-                onChange={(e) => setSearchQuery(e.target.value)}
-                data-testid="input-search-notes"
-              />
+
+          {/* Group tabs */}
+          <div className="flex items-center gap-0.5 px-2 pt-2 pb-1 border-b border-border/30 overflow-x-auto scrollbar-none">
+            {groups.map(group => (
+              <div key={group.id} className="relative group/tab shrink-0">
+                {editingGroupId === group.id ? (
+                  <input
+                    autoFocus
+                    value={editingGroupName}
+                    onChange={e => setEditingGroupName(e.target.value)}
+                    onBlur={() => {
+                      if (editingGroupName.trim() && editingGroupName !== group.name) {
+                        updateGroup.mutate({ id: group.id, name: editingGroupName.trim() });
+                      }
+                      setEditingGroupId(null);
+                    }}
+                    onKeyDown={e => {
+                      if (e.key === "Enter") (e.target as HTMLInputElement).blur();
+                      if (e.key === "Escape") { setEditingGroupId(null); }
+                    }}
+                    className="text-[11px] font-medium px-2 py-1 rounded bg-primary/10 border border-primary/30 outline-none w-24"
+                  />
+                ) : (
+                  <button
+                    onClick={() => { setActiveGroupId(group.id); setSelectMode(false); setSelectedNoteIds(new Set()); }}
+                    onDoubleClick={() => { if (!group.isDefault) { setEditingGroupId(group.id); setEditingGroupName(group.name); } }}
+                    className={`flex items-center gap-1 text-[11px] font-medium px-2.5 py-1 rounded transition-colors whitespace-nowrap ${
+                      activeGroupId === group.id
+                        ? "bg-primary/10 text-primary"
+                        : "text-muted-foreground hover:text-foreground hover:bg-muted/40"
+                    }`}
+                  >
+                    <span>{group.icon}</span>
+                    <span>{group.name}</span>
+                    <span className="text-[9px] opacity-50 ml-0.5">{notes.filter(n => (n.groupId || "default") === group.id).length}</span>
+                  </button>
+                )}
+                {!group.isDefault && activeGroupId === group.id && (
+                  <button
+                    onClick={() => {
+                      if (confirm(`Delete group "${group.name}"? Notes will move to the default group.`)) {
+                        deleteGroup.mutate(group.id);
+                      }
+                    }}
+                    className="absolute -top-1 -right-1 hidden group-hover/tab:flex w-3.5 h-3.5 rounded-full bg-destructive/80 text-white items-center justify-center"
+                  >
+                    <X className="w-2 h-2" />
+                  </button>
+                )}
+              </div>
+            ))}
+            {/* Add group */}
+            {newGroupName !== null && (
+              <div className="shrink-0">
+                {newGroupName === "" ? (
+                  <button
+                    onClick={() => setNewGroupName(" ")}
+                    className="flex items-center gap-1 text-[11px] px-2 py-1 rounded text-muted-foreground/50 hover:text-muted-foreground hover:bg-muted/40 transition-colors"
+                    title="New group"
+                  >
+                    <Plus className="w-3 h-3" />
+                  </button>
+                ) : (
+                  <input
+                    autoFocus
+                    value={newGroupName.trim()}
+                    placeholder="Group name"
+                    onChange={e => setNewGroupName(e.target.value)}
+                    onBlur={() => {
+                      if (newGroupName.trim()) createGroup.mutate({ name: newGroupName.trim() });
+                      else setNewGroupName("");
+                    }}
+                    onKeyDown={e => {
+                      if (e.key === "Enter" && newGroupName.trim()) createGroup.mutate({ name: newGroupName.trim() });
+                      if (e.key === "Escape") setNewGroupName("");
+                    }}
+                    className="text-[11px] font-medium px-2 py-1 rounded bg-muted/40 border border-border/40 outline-none w-24"
+                  />
+                )}
+              </div>
+            )}
+          </div>
+
+          <div className="p-2 space-y-1.5">
+            {/* Search + select toggle */}
+            <div className="flex items-center gap-1.5">
+              <div className="relative flex-1">
+                <Search className="absolute left-2.5 top-1/2 -translate-y-1/2 w-3.5 h-3.5 text-muted-foreground/50" />
+                <Input
+                  placeholder="Search notes..."
+                  className="h-8 text-xs pl-8 bg-muted/30 border-border/30"
+                  value={searchQuery}
+                  onChange={(e) => setSearchQuery(e.target.value)}
+                  data-testid="input-search-notes"
+                />
+              </div>
+              <Button
+                size="icon"
+                variant={selectMode ? "secondary" : "ghost"}
+                className="h-8 w-8 shrink-0"
+                onClick={() => { setSelectMode(s => !s); setSelectedNoteIds(new Set()); }}
+                title="Select notes"
+              >
+                <CheckSquare className="w-3.5 h-3.5" />
+              </Button>
             </div>
-
-
+            {/* Select-all row */}
+            {selectMode && filteredNotes.length > 0 && (
+              <button
+                onClick={toggleSelectAll}
+                className="w-full flex items-center gap-2 text-[11px] text-muted-foreground hover:text-foreground px-1 transition-colors"
+              >
+                {selectedNoteIds.size === filteredNotes.length
+                  ? <CheckSquare className="w-3 h-3 text-primary" />
+                  : <Square className="w-3 h-3" />}
+                {selectedNoteIds.size === filteredNotes.length ? "Deselect all" : `Select all (${filteredNotes.length})`}
+              </button>
+            )}
           </div>
 
           {/* Notes list */}
@@ -506,18 +723,65 @@ export default function NotesPage() {
                   <p className="text-[10px] text-muted-foreground/25 mt-0.5">Create one to get started</p>
                 </div>
               )}
-              {filteredNotes.map(note => (
+              {filteredNotes.map((note, idx) => (
                 <NoteListItem
                   key={note.id}
                   note={note}
                   isSelected={selectedNote?.id === note.id}
                   isInContext={contextNoteIds.has(note.id)}
-                  onSelect={() => selectNote(note)}
-                  onToggleContext={() => toggleNoteContext(note.id)}
+                  selectMode={selectMode}
+                  isChecked={selectedNoteIds.has(note.id)}
+                  onItemClick={(e) => handleNoteItemClick(note, idx, e)}
                 />
               ))}
             </div>
           </ScrollArea>
+
+          {/* Bulk action bar */}
+          {selectMode && selectedNoteIds.size > 0 && (
+            <div className="border-t border-border/40 p-2 flex items-center gap-2 bg-muted/20">
+              <span className="text-[11px] text-muted-foreground flex-1">{selectedNoteIds.size} selected</span>
+              <DropdownMenu>
+                <DropdownMenuTrigger asChild>
+                  <Button size="sm" variant="ghost" className="h-7 text-xs gap-1">
+                    Move to <ChevronDown className="w-3 h-3" />
+                  </Button>
+                </DropdownMenuTrigger>
+                <DropdownMenuContent align="end">
+                  {groups.map(g => (
+                    <DropdownMenuItem
+                      key={g.id}
+                      disabled={g.id === activeGroupId}
+                      onClick={() => {
+                        const ids = Array.from(selectedNoteIds);
+                        Promise.all(ids.map(id => apiRequest("PATCH", withVault(`/api/notes/${id}`, vaultParam), { groupId: g.id })))
+                          .then(() => {
+                            queryClient.invalidateQueries({ queryKey: ["/api/notes"] });
+                            setSelectedNoteIds(new Set());
+                            setSelectMode(false);
+                            toast({ title: `Moved ${ids.length} note${ids.length > 1 ? "s" : ""} to ${g.name}` });
+                          });
+                      }}
+                    >
+                      <span className="mr-2">{g.icon}</span>{g.name}
+                    </DropdownMenuItem>
+                  ))}
+                </DropdownMenuContent>
+              </DropdownMenu>
+              <Button
+                size="sm"
+                variant="destructive"
+                className="h-7 text-xs gap-1"
+                onClick={() => {
+                  if (confirm(`Delete ${selectedNoteIds.size} note${selectedNoteIds.size > 1 ? "s" : ""}?`)) {
+                    bulkDeleteNotes.mutate(Array.from(selectedNoteIds));
+                  }
+                }}
+              >
+                <Trash2 className="w-3 h-3" /> Delete
+              </Button>
+            </div>
+          )}
         </div>
 
         <ResizeHandle onMouseDown={noteList.onMouseDown} isResizing={noteList.isResizing} />

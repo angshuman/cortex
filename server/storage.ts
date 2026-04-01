@@ -1,7 +1,7 @@
 import fs from "fs";
 import path from "path";
 import { v4 as uuid } from "uuid";
-import type { Note, InsertNote, Task, InsertTask, ChatSession, ChatEvent, Skill, Config, SearchResult, Vault, InsertVault, VaultSettings } from "@shared/schema";
+import type { Note, InsertNote, NoteGroup, InsertNoteGroup, Task, InsertTask, ChatSession, ChatEvent, Skill, Config, SearchResult, Vault, InsertVault, VaultSettings } from "@shared/schema";
 import { defaultSkills } from "./default-skills";
 
 const DEFAULT_DATA_DIR = path.join(process.cwd(), ".cortex-data");
@@ -59,6 +59,70 @@ export class FileStorage {
 
   getDataDir(): string { return this.dataDir; }
 
+  // ============ NOTE GROUPS ============
+  private noteGroupsPath() { return path.join(this.dataDir, "notes", "groups.json"); }
+
+  getNoteGroups(vaultName?: string): NoteGroup[] {
+    const groups: NoteGroup[] = readJson(this.noteGroupsPath(), []);
+    if (groups.length === 0) {
+      // Auto-create default group named after the vault
+      const now = new Date().toISOString();
+      const defaultGroup: NoteGroup = {
+        id: "default",
+        name: vaultName || "Notes",
+        icon: "📁",
+        color: "#6366f1",
+        isDefault: true,
+        createdAt: now,
+        updatedAt: now,
+      };
+      writeJson(this.noteGroupsPath(), [defaultGroup]);
+      return [defaultGroup];
+    }
+    return groups;
+  }
+
+  createNoteGroup(input: InsertNoteGroup): NoteGroup {
+    const now = new Date().toISOString();
+    const group: NoteGroup = {
+      id: uuid(),
+      name: input.name,
+      icon: input.icon || "📁",
+      color: input.color || "#6366f1",
+      isDefault: false,
+      createdAt: now,
+      updatedAt: now,
+    };
+    const groups = this.getNoteGroups();
+    groups.push(group);
+    writeJson(this.noteGroupsPath(), groups);
+    return group;
+  }
+
+  updateNoteGroup(id: string, updates: Partial<NoteGroup>): NoteGroup | undefined {
+    const groups = this.getNoteGroups();
+    const idx = groups.findIndex(g => g.id === id);
+    if (idx === -1) return undefined;
+    groups[idx] = { ...groups[idx], ...updates, updatedAt: new Date().toISOString() };
+    writeJson(this.noteGroupsPath(), groups);
+    return groups[idx];
+  }
+
+  deleteNoteGroup(id: string): boolean {
+    const groups = this.getNoteGroups();
+    const target = groups.find(g => g.id === id);
+    if (!target || target.isDefault) return false;
+    // Reassign all notes in this group to the default group
+    const notes = this.getNotesIndex();
+    let changed = false;
+    for (const note of notes) {
+      if (note.groupId === id) { note.groupId = "default"; changed = true; }
+    }
+    if (changed) this.saveNotesIndex(notes);
+    writeJson(this.noteGroupsPath(), groups.filter(g => g.id !== id));
+    return true;
+  }
+
   // ============ NOTES ============
   private notesIndexPath() { return path.join(this.dataDir, "notes", "index.json"); }
 
@@ -85,6 +149,7 @@ export class FileStorage {
       title: input.title,
       content: input.content,
       folder: input.folder || "/",
+      groupId: input.groupId || "default",
       tags: input.tags || [],
       attachments: input.attachments || [],
       pinned: input.pinned || false,
@@ -119,6 +184,15 @@ export class FileStorage {
     if (filtered.length === notes.length) return false;
     this.saveNotesIndex(filtered);
     return true;
+  }
+
+  bulkDeleteNotes(ids: string[]): number {
+    const idSet = new Set(ids);
+    const notes = this.getNotesIndex();
+    const filtered = notes.filter(n => !idSet.has(n.id));
+    const deleted = notes.length - filtered.length;
+    if (deleted > 0) this.saveNotesIndex(filtered);
+    return deleted;
   }
 
   getNoteFolders(): string[] {
@@ -177,7 +251,7 @@ export class FileStorage {
       originalFilename = chatMatch[1];
       buffer = this.getChatAsset(originalFilename);
       if (!buffer) {
-        console.log(`[migrate] Chat asset not found: ${originalFilename} in ${this.dataDir}`);
+        console.log(`[migrate] Chat asset not found: ${originalFilename}`);
       }
     }
 
@@ -191,14 +265,13 @@ export class FileStorage {
     }
 
     if (!buffer) {
-      console.log(`[migrate] Could not find source image for URL: ${sourceUrl}`);
+
       return null;
     }
 
     // Save to this note's assets folder
     const newFilename = `${Date.now()}-${originalFilename}`;
     const newUrl = this.saveNoteAsset(noteId, newFilename, buffer);
-    console.log(`[migrate] Copied image to note ${noteId}: ${sourceUrl} -> ${newUrl}`);
     return newUrl;
   }
 
@@ -216,13 +289,12 @@ export class FileStorage {
         matchCount++;
         // Don't migrate if already pointing to this note's assets
         if (url.startsWith(`/api/notes/${noteId}/assets/`)) return _match;
-        console.log(`[migrate] Found image in note ${noteId}: ${url}`);
         const newUrl = this.migrateImageToNote(noteId, url);
         return newUrl ? `${altPart}(${newUrl})` : _match;
       }
     );
     if (matchCount === 0 && content.includes("/api/")) {
-      console.log(`[migrate] No image markdown matched in note ${noteId}, but content contains /api/. Content snippet: ${content.slice(0, 300)}`);
+      // Possible mis-formatted image URL — no action needed, just pass through
     }
     return result;
   }

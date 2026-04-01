@@ -1,4 +1,4 @@
-import { useState, useEffect, useRef, useCallback } from "react";
+import { useState, useEffect, useRef, useCallback, useMemo } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { apiRequest, withVault } from "@/lib/queryClient";
 import { useVault } from "@/hooks/use-vault";
@@ -25,6 +25,7 @@ import {
   X,
   Paperclip,
   Check,
+  ListOrdered,
 } from "lucide-react";
 import { marked } from "@/lib/marked-config";
 import { useImagePaste } from "@/hooks/use-image-paste";
@@ -51,6 +52,10 @@ export default function ChatPage() {
   const [showSkillsPicker, setShowSkillsPicker] = useState(false);
   const wsRef = useRef<WebSocket | null>(null);
   const pendingMessageRef = useRef<string | null>(null);
+  // Tracks whether live WS events have arrived for this session.
+  // Prevents the session-query refetch from overwriting streamed events.
+  const hasLiveEventsRef = useRef(false);
+  const prevSessionIdRef = useRef<string | null>(null);
   const scrollRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLTextAreaElement>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
@@ -81,8 +86,18 @@ export default function ChatPage() {
   });
 
   useEffect(() => {
-    if (session?.events) setEvents(session.events);
-  }, [session]);
+    // When the session ID changes (navigating to a different chat),
+    // reset the live-events guard so the session query can populate events.
+    if (prevSessionIdRef.current !== sessionId) {
+      prevSessionIdRef.current = sessionId || null;
+      hasLiveEventsRef.current = false;
+    }
+    // Only load from server if no live WS events have arrived yet.
+    // This prevents the query refetch from overwriting mid-stream events.
+    if (session?.events && !hasLiveEventsRef.current) {
+      setEvents(session.events);
+    }
+  }, [session, sessionId]);
 
   // WebSocket connection
   useEffect(() => {
@@ -110,12 +125,14 @@ export default function ChatPage() {
         setStatus(data.content === "thinking" ? "thinking" : data.content === "done" ? "idle" : "idle");
         if (data.content === "done") {
           queryClient.invalidateQueries({ queryKey: ["/api/chat/sessions"] });
-          // AI may have created notes/tasks via tools — invalidate so other pages refresh
           queryClient.invalidateQueries({ queryKey: ["/api/notes"] });
           queryClient.invalidateQueries({ queryKey: ["/api/notes/folders"] });
           queryClient.invalidateQueries({ queryKey: ["/api/tasks"] });
+          // Allow session refetch to sync final state
+          hasLiveEventsRef.current = false;
         }
       } else {
+        hasLiveEventsRef.current = true;
         setEvents(prev => [...prev, data]);
       }
     };
@@ -205,6 +222,25 @@ export default function ChatPage() {
     });
   };
 
+  // Dynamic status text derived from the most recent event
+  const currentActivity = useMemo(() => {
+    if (status !== "thinking") return null;
+    for (let i = events.length - 1; i >= 0; i--) {
+      const e = events[i];
+      if (e.type === "tool_call") {
+        try { return `Using ${JSON.parse(e.content).name}`; } catch {}
+      }
+      if (e.type === "tool_result") return "Processing result...";
+      if (e.type === "plan") return "Planning...";
+      if (e.type === "thought") {
+        if (e.metadata?.kind === "intent") return "Understanding...";
+        const t = e.content;
+        return t.length > 40 ? t.slice(0, 40) + "…" : t;
+      }
+    }
+    return "Thinking...";
+  }, [events, status]);
+
   const handleNewChat = async () => {
     try {
       const res = await apiRequest("POST", withVault("/api/chat/sessions", vaultParam), { title: "New Chat" });
@@ -260,82 +296,109 @@ export default function ChatPage() {
         );
 
       case "thought":
+        // Intent restatement — prominent card
+        if (event.metadata?.kind === "intent") {
+          return (
+            <div key={event.id || idx} className="mb-3 rounded-lg bg-primary/5 border border-primary/20 px-3.5 py-2.5">
+              <div className="flex items-start gap-2.5">
+                <Brain className="w-4 h-4 text-primary/50 mt-0.5 shrink-0" />
+                <div>
+                  <p className="text-[10px] font-semibold text-primary/60 uppercase tracking-wider mb-1">Understanding</p>
+                  <p className="text-sm text-foreground/80 leading-snug">{event.content}</p>
+                </div>
+              </div>
+            </div>
+          );
+        }
+        // Working thought — visible but secondary
         return (
-          <div key={event.id || idx} className="flex mb-2 gap-3 items-start">
-            <div className="flex-shrink-0 w-7 h-7 rounded-full bg-muted/60 flex items-center justify-center mt-0.5">
-              <Brain className="w-3.5 h-3.5 text-muted-foreground" />
+          <div key={event.id || idx} className="flex mb-1.5 gap-3 items-start">
+            <div className="flex-shrink-0 w-7 flex justify-center pt-1.5">
+              <div className="w-1.5 h-1.5 rounded-full bg-muted-foreground/40" />
             </div>
-            <div className="flex-1 min-w-0">
-              <p className="text-xs text-muted-foreground italic">{event.content}</p>
-            </div>
+            <p className="text-xs text-muted-foreground/80 leading-relaxed">{event.content}</p>
           </div>
         );
 
-      case "tool_call":
+      case "plan": {
+        const steps: string[] = event.metadata?.steps || event.content.split("\n").filter(Boolean);
+        const isCollapsed = expandedTools.has(`collapsed-${event.id || idx}`);
+        return (
+          <div key={event.id || idx} className="mb-3 rounded-lg border border-border/60 overflow-hidden">
+            <button
+              onClick={() => toggleToolExpand(`collapsed-${event.id || idx}`)}
+              className="w-full flex items-center gap-2 px-3.5 py-2 bg-muted/30 hover:bg-muted/50 transition-colors text-left border-b border-border/40"
+            >
+              <ListOrdered className="w-3.5 h-3.5 text-foreground/50 shrink-0" />
+              <span className="text-xs font-semibold text-foreground/70">
+                {event.metadata?.revised ? "Revised Plan" : "Plan"}
+              </span>
+              <span className="text-xs text-muted-foreground ml-1">— {steps.length} steps</span>
+              <span className="ml-auto">{isCollapsed ? <ChevronRight className="w-3.5 h-3.5 text-muted-foreground" /> : <ChevronDown className="w-3.5 h-3.5 text-muted-foreground" />}</span>
+            </button>
+            {!isCollapsed && (
+              <ol className="px-3.5 py-2.5 space-y-2">
+                {steps.map((step, i) => (
+                  <li key={i} className="flex items-start gap-2.5">
+                    <span className="shrink-0 w-5 h-5 rounded-full bg-muted border border-border/50 flex items-center justify-center text-[10px] font-bold text-muted-foreground mt-0.5">{i + 1}</span>
+                    <span className="text-sm text-foreground/75 leading-snug">{step}</span>
+                  </li>
+                ))}
+              </ol>
+            )}
+          </div>
+        );
+      }
+
+      case "tool_call": {
         try {
           const data = JSON.parse(event.content);
-          const isExpanded = expandedTools.has(event.id || String(idx));
+          const args = data.args || {};
+          // Pick the most descriptive single arg to show inline
+          const PRIORITY_KEYS = ["url", "query", "title", "name", "path", "id", "keyword"];
+          const inlineKey = PRIORITY_KEYS.find(k => args[k]) || Object.keys(args)[0];
+          const inlineVal = inlineKey ? String(args[inlineKey]).slice(0, 60) : "";
           return (
-            <div key={event.id || idx} className="flex mb-1 gap-3 items-start">
-              <div className="flex-shrink-0 w-7 h-7 rounded-full bg-muted/60 flex items-center justify-center mt-0.5">
-                <Wrench className="w-3.5 h-3.5 text-muted-foreground" />
-              </div>
-              <div className="flex-1 min-w-0">
-                <button
-                  onClick={() => toggleToolExpand(event.id || String(idx))}
-                  className="flex items-center gap-1.5 text-xs text-muted-foreground hover:text-foreground transition-colors"
-                >
-                  {isExpanded ? <ChevronDown className="w-3 h-3" /> : <ChevronRight className="w-3 h-3" />}
-                  <Badge variant="secondary" className="text-[10px] px-1.5 py-0 h-4 font-mono">
-                    {data.name}
-                  </Badge>
-                </button>
-                {isExpanded && (
-                  <pre className="text-[10px] text-muted-foreground bg-muted/50 rounded p-2 mt-1 overflow-x-auto">
-                    {JSON.stringify(data.args, null, 2)}
-                  </pre>
-                )}
-              </div>
+            <div key={event.id || idx} className="mb-1 flex items-center gap-1.5 px-2.5 py-1 rounded bg-muted/20 border border-border/30 text-xs text-muted-foreground">
+              <Wrench className="w-3 h-3 shrink-0 opacity-50" />
+              <code className="font-mono font-medium text-foreground/70">{data.name}</code>
+              {inlineVal && <span className="opacity-50 truncate max-w-xs">{inlineVal}</span>}
             </div>
           );
         } catch {
           return null;
         }
+      }
 
-      case "tool_result":
+      case "tool_result": {
         const isExpResult = expandedTools.has(event.id || String(idx));
+        // Show just the first line or first 80 chars inline; click to expand
+        const firstLine = event.content.split("\n").find(l => l.trim()) || event.content;
+        const preview = firstLine.slice(0, 80) + (event.content.length > 80 ? "…" : "");
         return (
-          <div key={event.id || idx} className="flex mb-2 gap-3 items-start">
-            <div className="w-7" />
-            <div className="flex-1 min-w-0">
-              <button
-                onClick={() => toggleToolExpand(event.id || String(idx))}
-                className="flex items-center gap-1.5 text-xs text-muted-foreground hover:text-foreground transition-colors"
-              >
-                {isExpResult ? <ChevronDown className="w-3 h-3" /> : <ChevronRight className="w-3 h-3" />}
-                <span>Result</span>
-              </button>
-              {isExpResult && (
-                <pre className="text-[10px] text-muted-foreground bg-muted/50 rounded p-2 mt-1 overflow-x-auto max-h-32">
-                  {(() => {
-                    try { return JSON.stringify(JSON.parse(event.content), null, 2); }
-                    catch { return event.content; }
-                  })()}
-                </pre>
-              )}
-            </div>
+          <div key={event.id || idx} className="mb-1.5">
+            <button
+              onClick={() => toggleToolExpand(event.id || String(idx))}
+              className="flex items-center gap-1.5 px-2.5 py-1 rounded bg-muted/10 border border-border/20 text-xs text-muted-foreground hover:bg-muted/20 transition-colors w-full text-left"
+            >
+              <Check className="w-3 h-3 text-green-500/60 shrink-0" />
+              <span className="truncate opacity-60">{preview}</span>
+              {event.content.length > 80 && <span className="ml-auto shrink-0 opacity-40 text-[10px]">{isExpResult ? "▲" : "▼"}</span>}
+            </button>
+            {isExpResult && (
+              <pre className="text-[11px] text-muted-foreground bg-muted/10 px-3 py-2 overflow-x-auto max-h-48 rounded-b border border-t-0 border-border/20 leading-relaxed">
+                {event.content}
+              </pre>
+            )}
           </div>
         );
+      }
 
       case "error":
         return (
-          <div key={event.id || idx} className="flex mb-3 gap-3 items-start">
-            <div className="flex-shrink-0 w-7 h-7 rounded-full bg-destructive/10 flex items-center justify-center mt-0.5">
-              <AlertCircle className="w-3.5 h-3.5 text-destructive" />
-            </div>
-            <div className="flex-1 min-w-0">
-              <p className="text-xs text-destructive">{event.content}</p>
-            </div>
+          <div key={event.id || idx} className="mb-3 rounded-lg bg-destructive/5 border border-destructive/20 px-3.5 py-2.5 flex gap-2.5 items-start">
+            <AlertCircle className="w-4 h-4 text-destructive shrink-0 mt-0.5" />
+            <p className="text-sm text-destructive">{event.content}</p>
           </div>
         );
 
@@ -377,11 +440,11 @@ export default function ChatPage() {
         <span className="text-sm font-medium truncate">
           {session?.title || "New Chat"}
         </span>
-        {status === "thinking" && (
-          <Badge variant="secondary" className="text-[10px] gap-1 ml-auto">
-            <Loader2 className="w-3 h-3 animate-spin" />
-            Thinking
-          </Badge>
+        {status === "thinking" && currentActivity && (
+          <div className="flex items-center gap-1.5 ml-auto text-xs text-muted-foreground">
+            <Loader2 className="w-3 h-3 animate-spin shrink-0" />
+            <span className="truncate max-w-[200px]">{currentActivity}</span>
+          </div>
         )}
       </header>
 
@@ -399,16 +462,12 @@ export default function ChatPage() {
             </div>
           )}
           {events.map((e, i) => renderEvent(e, i))}
-          {status === "thinking" && events.length > 0 && (
-            <div className="flex mb-3 gap-3 items-center">
-              <div className="flex-shrink-0 w-7 h-7 rounded-full bg-muted/60 flex items-center justify-center">
-                <Loader2 className="w-3.5 h-3.5 text-muted-foreground animate-spin" />
+          {status === "thinking" && (
+            <div className="flex items-center gap-2.5 mb-3 mt-1">
+              <div className="flex-shrink-0 w-7 flex justify-center">
+                <Loader2 className="w-3.5 h-3.5 text-muted-foreground/60 animate-spin" />
               </div>
-              <div className="flex gap-1">
-                <span className="w-1.5 h-1.5 rounded-full bg-muted-foreground/40 animate-bounce" style={{ animationDelay: "0ms" }} />
-                <span className="w-1.5 h-1.5 rounded-full bg-muted-foreground/40 animate-bounce" style={{ animationDelay: "150ms" }} />
-                <span className="w-1.5 h-1.5 rounded-full bg-muted-foreground/40 animate-bounce" style={{ animationDelay: "300ms" }} />
-              </div>
+              <span className="text-xs text-muted-foreground/70">{currentActivity}</span>
             </div>
           )}
         </div>

@@ -1,7 +1,7 @@
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { apiRequest, withVault } from "@/lib/queryClient";
 import { useVault } from "@/hooks/use-vault";
-import { useLocation } from "wouter";
+import { useLocation, useRoute } from "wouter";
 import {
   Select,
   SelectContent,
@@ -14,7 +14,7 @@ import {
   TooltipContent,
   TooltipTrigger,
 } from "@/components/ui/tooltip";
-import { Zap, Cpu, AlertTriangle, RotateCcw } from "lucide-react";
+import { Zap, Cpu, AlertTriangle, RotateCcw, Layers } from "lucide-react";
 
 const PROVIDER_NAMES: Record<string, string> = {
   openai: "OpenAI",
@@ -25,10 +25,10 @@ const PROVIDER_NAMES: Record<string, string> = {
 };
 
 const PROVIDER_MODELS: Record<string, string> = {
-  openai: "gpt-4o",
-  anthropic: "claude-sonnet-4-20250514",
-  grok: "grok-3",
-  google: "gemini-2.0-flash",
+  openai: "gpt-4.1",
+  anthropic: "claude-opus-4-5",
+  grok: "grok-4",
+  google: "gemini-2.5-flash",
 };
 
 function formatTokens(n: number): string {
@@ -53,10 +53,20 @@ function estimateCost(provider: string, inputTokens: number, outputTokens: numbe
   return `~$${cost.toFixed(2)}`;
 }
 
+// Context window sizes in tokens by provider
+const CONTEXT_WINDOW: Record<string, number> = {
+  anthropic: 200_000,
+  openai:    128_000,
+  grok:      131_072,
+  google:  1_000_000,
+};
+
 export function StatusBar() {
   const queryClient = useQueryClient();
   const { vaultParam } = useVault();
   const [, setLocation] = useLocation();
+  const [, chatParams] = useRoute("/chat/:id");
+  const currentSessionId = chatParams?.id ?? null;
 
   const { data: stats } = useQuery<{
     totalInputTokens: number;
@@ -83,6 +93,15 @@ export function StatusBar() {
   const { data: config } = useQuery<any>({
     queryKey: ["/api/config"],
     queryFn: () => apiRequest("GET", "/api/config").then((r) => r.json()),
+  });
+
+  // Fetch current chat session to show context window fill
+  const { data: currentSession } = useQuery<{ contextTokens?: number }>({
+    queryKey: ["/api/chat/sessions", currentSessionId, vaultParam],
+    queryFn: () => apiRequest("GET", withVault(`/api/chat/sessions/${currentSessionId}`, vaultParam)).then(r => r.json()),
+    enabled: !!currentSessionId,
+    refetchInterval: 3000,
+    select: (s: any) => ({ contextTokens: s?.contextTokens }),
   });
 
   const updateConfig = useMutation({
@@ -214,6 +233,40 @@ export function StatusBar() {
           </Tooltip>
         </>
       )}
+
+      {/* Context window fill — shown when in a chat session */}
+      {currentSessionId && currentSession?.contextTokens != null && (() => {
+        const used = currentSession.contextTokens;
+        const limit = CONTEXT_WINDOW[provider] ?? 128_000;
+        const pct = Math.min(100, Math.round((used / limit) * 100));
+        const color = pct >= 80 ? "bg-red-500" : pct >= 60 ? "bg-yellow-500" : "bg-primary/60";
+        return (
+          <>
+            <div className="w-px h-3 bg-border/50 mx-1" />
+            <Tooltip>
+              <TooltipTrigger asChild>
+                <div className="flex items-center gap-1.5 px-1.5 h-full">
+                  <Layers className="w-3 h-3" />
+                  <div className="flex items-center gap-1">
+                    <div className="w-16 h-1.5 bg-muted rounded-full overflow-hidden">
+                      <div className={`h-full rounded-full transition-all ${color}`} style={{ width: `${pct}%` }} />
+                    </div>
+                    <span className="tabular-nums">{pct}%</span>
+                  </div>
+                </div>
+              </TooltipTrigger>
+              <TooltipContent side="top" className="text-xs">
+                <div className="space-y-0.5">
+                  <div className="font-medium">Context Window</div>
+                  <div>Used: {formatTokens(used)} / {formatTokens(limit)}</div>
+                  <div>{pct}% full</div>
+                  {pct >= 80 && <div className="text-red-400 font-medium">⚠ Context nearly full</div>}
+                </div>
+              </TooltipContent>
+            </Tooltip>
+          </>
+        );
+      })()}
 
       {/* Right-aligned spacer */}
       <div className="flex-1" />

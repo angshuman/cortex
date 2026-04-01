@@ -1,517 +1,55 @@
-import Anthropic from "@anthropic-ai/sdk";
-import OpenAI from "openai";
-import fs from "fs";
 import { v4 as uuid } from "uuid";
 import { FileStorage } from "./storage";
 import { mcpManager } from "./mcp-client";
 import type { ChatEvent, Skill, VaultSettings, AgentSettings } from "@shared/schema";
+import {
+  defaultAgentSettings,
+  type EventCallback, type EmitFn,
+  type ContextItem, type ContentBlock, type AgentMessage, type ToolDef,
+} from "./agent-types";
+import { detectProvider, callLLMJson } from "./agent-llm";
+import { getToolDefinitions } from "./agent-tools";
+import { runAgentLoop } from "./agent-loop";
 
-type EventCallback = (event: ChatEvent) => void;
+export type { ContextItem };
 
-export interface ContextItem {
-  type: "note" | "task" | "text" | "file";
-  title: string;
-  content: string;
-  id?: string;
-  mimeType?: string;
-}
+// ── Skill selection ───────────────────────────────────────────────────────────
 
-interface ImageBlock {
-  type: "image";
-  url: string;         // local URL like /api/chat/assets/xxx.png
-  mediaType: string;   // e.g. image/png
-}
-
-interface TextBlock {
-  type: "text";
-  text: string;
-}
-
-type ContentBlock = TextBlock | ImageBlock;
-
-interface AgentMessage {
-  role: "user" | "assistant" | "system";
-  content: string | ContentBlock[];
-}
-
-interface ToolDef {
-  name: string;
-  description: string;
-  parameters: Record<string, any>;
-}
-
-/**
- * Resolve the active AI provider and model.
- * Priority: config.json apiKeys > env vars.
- * Accepts optional VaultManager to read saved keys.
- */
-function detectProvider(storage?: FileStorage): { provider: string; model: string } {
-  // Try config keys first via storage's parent VaultManager
-  // We access the VaultManager lazily to avoid circular deps
-  try {
-    const { vaultManager } = require("./storage");
-    if (vaultManager) {
-      const ak = vaultManager.resolveApiKey("anthropic");
-      const ok = vaultManager.resolveApiKey("openai");
-      const gk = vaultManager.resolveApiKey("grok");
-      const goog = vaultManager.resolveApiKey("google");
-      if (ak && ak.length > 10) return { provider: "claude", model: "claude-sonnet-4-20250514" };
-      if (ok && ok.length > 10) return { provider: "openai", model: "gpt-4o" };
-      if (gk && gk.length > 10) return { provider: "grok", model: "grok-3" };
-      if (goog && goog.length > 10) return { provider: "google", model: "gemini-2.0-flash" };
-    }
-  } catch {}
-  // Fallback to env vars only
-  const ak = process.env.ANTHROPIC_API_KEY;
-  const ok = process.env.OPENAI_API_KEY;
-  const gk = process.env.GROK_API_KEY;
-  const goog = process.env.GOOGLE_API_KEY;
-  if (ak && ak.length > 10) return { provider: "claude", model: "claude-sonnet-4-20250514" };
-  if (ok && ok.length > 10) return { provider: "openai", model: "gpt-4o" };
-  if (gk && gk.length > 10) return { provider: "grok", model: "grok-3" };
-  if (goog && goog.length > 10) return { provider: "google", model: "gemini-2.0-flash" };
-  return { provider: "none", model: "none" };
-}
-
-/** Resolve an API key for a provider from config + env. */
-function resolveKey(provider: "openai" | "anthropic" | "grok" | "google"): string {
-  try {
-    const { vaultManager } = require("./storage");
-    if (vaultManager) return vaultManager.resolveApiKey(provider);
-  } catch {}
-  const envMap: Record<string, string> = {
-    openai: process.env.OPENAI_API_KEY || "",
-    anthropic: process.env.ANTHROPIC_API_KEY || "",
-    grok: process.env.GROK_API_KEY || "",
-    google: process.env.GOOGLE_API_KEY || "",
-  };
-  return envMap[provider] || "";
-}
-
-/**
- * Select skills relevant to the current user message + context.
- * Priority 0 skills and skills without triggerKeywords are always included.
- * Others are matched by keyword against the user's message and context.
- */
-function selectRelevantSkills(allSkills: Skill[], userMessage: string, contextItems: ContextItem[] = [], forcedSkillNames: string[] = []): Skill[] {
-  const messageLower = userMessage.toLowerCase();
-  const contextText = contextItems.map(c => c.title + " " + c.content).join(" ").toLowerCase();
-  const combined = messageLower + " " + contextText;
-
+function selectRelevantSkills(
+  allSkills: Skill[],
+  userMessage: string,
+  contextItems: ContextItem[] = [],
+  forcedSkillNames: string[] = [],
+): Skill[] {
+  const combined = (userMessage + " " + contextItems.map(c => c.title + " " + c.content).join(" ")).toLowerCase();
   const selected: Skill[] = [];
+
   for (const skill of allSkills) {
     if (!skill.enabled) continue;
-    // Force-include if explicitly pinned by user
     if (forcedSkillNames.includes(skill.name)) { selected.push(skill); continue; }
-    // Priority 0 = always include
     if ((skill.priority ?? 1) === 0) { selected.push(skill); continue; }
-    // No trigger keywords = always include (backward compat)
     if (!skill.triggerKeywords || skill.triggerKeywords.length === 0) { selected.push(skill); continue; }
-    // Match any trigger keyword
-    if (skill.triggerKeywords.some(kw => combined.includes(kw.toLowerCase()))) {
-      selected.push(skill);
-    }
+    if (skill.triggerKeywords.some(kw => combined.includes(kw.toLowerCase()))) selected.push(skill);
   }
-  // Sort by priority (lower = more important = appears first in prompt)
+
   selected.sort((a, b) => (a.priority ?? 1) - (b.priority ?? 1));
   return selected;
 }
 
-function getToolDefinitions(storage: FileStorage): ToolDef[] {
-  const skills = storage.getSkills().filter((s: Skill) => s.enabled);
-  const tools: ToolDef[] = [];
-  
-  // Collect skill-defined tool names to avoid duplicates with MCP
-  const skillToolNames = new Set<string>();
-  
-  for (const skill of skills) {
-    // instructionsOnly skills provide guidance only — no tool registration
-    if (skill.instructionsOnly) continue;
-    // Skip browser-use stub tools if MCP playwright is connected (MCP provides them)
-    if (skill.name === "browser-use" && mcpManager.isConnected("playwright")) continue;
-    
-    for (const tool of skill.tools) {
-      const properties: Record<string, any> = {};
-      const required: string[] = [];
-      for (const p of tool.parameters) {
-        properties[p.name] = {
-          type: p.type === "string[]" ? "array" : "string",
-          description: p.description,
-        };
-        if (p.type === "string[]") properties[p.name].items = { type: "string" };
-        if (p.required) required.push(p.name);
-      }
-      tools.push({
-        name: tool.name,
-        description: `[${skill.name}] ${tool.description}`,
-        parameters: { type: "object" as const, properties, required },
-      });
-      skillToolNames.add(tool.name);
-    }
-  }
-  
-  // Add tools from all connected MCP servers
-  const toolsByServer = mcpManager.getToolsByServer();
-  Array.from(toolsByServer.entries()).forEach(([serverName, mcpTools]) => {
-    for (const mcpTool of mcpTools) {
-      // Don't add if a skill already defines this tool name
-      if (skillToolNames.has(mcpTool.name)) continue;
-      
-      // Convert MCP inputSchema to our ToolDef format
-      const schema = mcpTool.inputSchema || {};
-      tools.push({
-        name: mcpTool.name,
-        description: `[${serverName}] ${mcpTool.description}`,
-        parameters: {
-          type: "object" as const,
-          properties: schema.properties || {},
-          required: schema.required || [],
-        },
-      });
-      skillToolNames.add(mcpTool.name); // Prevent duplicates across servers
-    }
-  });
-  
-  return tools;
-}
+// ── System prompt ─────────────────────────────────────────────────────────────
 
-async function executeTool(name: string, args: Record<string, any>, storage: FileStorage, agentSettings: AgentSettings = defaultAgentSettings): Promise<string> {
-  try {
-    switch (name) {
-      case "create_note": {
-        let content = args.content || "";
-        const imageUrls: string[] = args.image_urls || [];
-
-        const note = storage.createNote({
-          title: args.title || "Untitled",
-          content,
-          folder: args.folder,
-          tags: args.tags,
-        });
-
-        // If image_urls were passed explicitly, copy them to note assets and prepend to content
-        if (imageUrls.length > 0) {
-          const imageParts: string[] = [];
-          for (const imgUrl of imageUrls) {
-            const newUrl = storage.migrateImageToNote(note.id, imgUrl);
-            if (newUrl) {
-              imageParts.push(`![image](${newUrl})`);
-            }
-          }
-          if (imageParts.length > 0) {
-            content = imageParts.join("\n") + "\n\n" + content;
-          }
-        }
-
-        // Also migrate any inline chat asset refs already in the content
-        content = storage.migrateContentImages(note.id, content);
-        if (content !== note.content) {
-          storage.updateNote(note.id, { content });
-        }
-        return JSON.stringify({ success: true, note: { id: note.id, title: note.title } });
-      }
-      case "read_note": {
-        const note = storage.getNote(args.id);
-        if (!note) return JSON.stringify({ error: "Note not found" });
-        return JSON.stringify(note);
-      }
-      case "list_notes": {
-        let notes = storage.getNotes();
-        if (args.folder) notes = notes.filter((n: any) => n.folder === args.folder || n.folder.startsWith(args.folder + "/"));
-        return JSON.stringify(notes.map((n: any) => ({ id: n.id, title: n.title, folder: n.folder, updatedAt: n.updatedAt })));
-      }
-      case "update_note": {
-        const updates: any = {};
-        if (args.title) updates.title = args.title;
-        if (args.content) {
-          // Migrate any chat asset images into the note's own assets folder
-          updates.content = storage.migrateContentImages(args.id, args.content);
-        }
-        const note = storage.updateNote(args.id, updates);
-        if (!note) return JSON.stringify({ error: "Note not found" });
-        return JSON.stringify({ success: true, note: { id: note.id, title: note.title } });
-      }
-      case "create_task": {
-        const task = storage.createTask({
-          title: args.title || "Untitled Task",
-          description: args.description,
-          priority: args.priority,
-          parentId: args.parentId,
-          dueDate: args.dueDate,
-        });
-        return JSON.stringify({ success: true, task: { id: task.id, title: task.title } });
-      }
-      case "list_tasks": {
-        let tasks = storage.getTasks();
-        if (args.status) tasks = tasks.filter((t: any) => t.status === args.status);
-        return JSON.stringify(tasks.map((t: any) => ({ id: t.id, title: t.title, status: t.status, priority: t.priority })));
-      }
-      case "update_task": {
-        const upd: any = {};
-        if (args.status) upd.status = args.status;
-        if (args.title) upd.title = args.title;
-        if (args.priority) upd.priority = args.priority;
-        const task = storage.updateTask(args.id, upd);
-        if (!task) return JSON.stringify({ error: "Task not found" });
-        return JSON.stringify({ success: true, task: { id: task.id, title: task.title, status: task.status } });
-      }
-      case "complete_task": {
-        const task = storage.updateTask(args.id, { status: "done" });
-        if (!task) return JSON.stringify({ error: "Task not found" });
-        return JSON.stringify({ success: true, task: { id: task.id, title: task.title, status: "done" } });
-      }
-      case "web_search": {
-        const query = args.query || "";
-        try {
-          // Use DuckDuckGo HTML search for broad web results
-          const searchUrl = `https://html.duckduckgo.com/html/?q=${encodeURIComponent(query)}`;
-          const resp = await fetch(searchUrl, {
-            headers: { "User-Agent": "Cortex/2.0 (search assistant)" },
-            signal: AbortSignal.timeout(15000),
-          });
-          if (!resp.ok) throw new Error(`Search failed: ${resp.status}`);
-          const html = await resp.text();
-          // Extract search results from DDG HTML
-          const results: Array<{ title: string; url: string; snippet: string }> = [];
-          const resultRegex = /<a[^>]+class="result__a"[^>]*href="([^"]+)"[^>]*>(.*?)<\/a>[\s\S]*?<a[^>]+class="result__snippet"[^>]*>(.*?)<\/a>/gi;
-          let m;
-          while ((m = resultRegex.exec(html)) !== null && results.length < 10) {
-            const rawUrl = m[1];
-            // DDG wraps URLs in a redirect — extract the actual URL
-            const urlMatch = rawUrl.match(/uddg=([^&]+)/);
-            const url = urlMatch ? decodeURIComponent(urlMatch[1]) : rawUrl;
-            results.push({
-              title: m[2].replace(/<[^>]+>/g, "").trim(),
-              url,
-              snippet: m[3].replace(/<[^>]+>/g, "").trim(),
-            });
-          }
-          if (results.length === 0) {
-            // Fallback: try HackerNews for tech queries
-            const hnUrl = `https://hn.algolia.com/api/v1/search?query=${encodeURIComponent(query)}&tags=story&hitsPerPage=8`;
-            const hnResp = await fetch(hnUrl, { signal: AbortSignal.timeout(10000) });
-            if (hnResp.ok) {
-              const hnData = await hnResp.json() as any;
-              for (const h of (hnData.hits || [])) {
-                results.push({
-                  title: h.title,
-                  url: h.url || `https://news.ycombinator.com/item?id=${h.objectID}`,
-                  snippet: `${h.points} points, ${h.num_comments} comments on HN`,
-                });
-              }
-            }
-          }
-          return JSON.stringify({ query, results });
-        } catch (err: any) {
-          return JSON.stringify({ error: `Search failed: ${err.message}` });
-        }
-      }
-      case "web_fetch": {
-        const url = args.url || "";
-        try {
-          const resp = await fetch(url, {
-            headers: { "User-Agent": "Cortex/1.0", "Accept": "application/json, text/html, */*" },
-            signal: AbortSignal.timeout(agentSettings.fetchTimeout),
-          });
-          if (!resp.ok) throw new Error(`HTTP ${resp.status} ${resp.statusText}`);
-          const contentType = resp.headers.get("content-type") || "";
-          let body: string;
-          if (contentType.includes("json")) {
-            body = JSON.stringify(await resp.json(), null, 2);
-          } else {
-            body = await resp.text();
-          }
-          // Truncate very large responses
-          if (body.length > agentSettings.fetchMaxLength) body = body.slice(0, agentSettings.fetchMaxLength) + "\n... (truncated)";
-          return JSON.stringify({ url, contentType, body });
-        } catch (err: any) {
-          return JSON.stringify({ error: `Fetch failed: ${err.message}` });
-        }
-      }
-      case "browser_navigate":
-      case "browser_screenshot":
-      case "browser_take_screenshot":
-      case "browser_click":
-      case "browser_type":
-      case "browser_snapshot":
-      case "browser_hover":
-      case "browser_press_key":
-      case "browser_tabs":
-      case "browser_fill_form":
-      case "browser_select_option":
-      case "browser_handle_dialog":
-      case "browser_file_upload":
-      case "browser_evaluate":
-      case "browser_drag":
-      case "browser_console_messages":
-      case "browser_wait":
-      case "browser_verify_value":
-      case "browser_mouse_click_xy":
-      case "browser_mouse_drag_xy":
-      case "browser_mouse_move_xy": {
-        // Route through MCP client
-        const server = mcpManager.findServerForTool(name);
-        if (!server) {
-          return JSON.stringify({ error: `Browser tool "${name}" not available. Enable the Playwright browser backend in Settings > General, then ensure the MCP server is running (npx @playwright/mcp).` });
-        }
-        try {
-          let result = await mcpManager.callTool(server, name, args);
-          // Post-tool-call hints: help the LLM handle common browser states
-          if (name !== "browser_handle_dialog") {
-            const lower = result.toLowerCase();
-            if (lower.includes("dialog") || lower.includes("[modal]") || lower.includes("alert box")) {
-              result += "\n\n[HINT: A dialog or popup appears to be present on the page. Use browser_handle_dialog to accept or dismiss it before continuing with other interactions.]";
-            }
-            if (lower.includes("cookie") || lower.includes("consent") || lower.includes("gdpr")) {
-              result += "\n\n[HINT: A cookie consent banner is detected. Look for an 'Accept' or 'Allow all' button in the accessibility tree and click it to proceed.]";
-            }
-          }
-          return result;
-        } catch (err: any) {
-          return JSON.stringify({ error: `Browser tool error: ${err.message}` });
-        }
-      }
-      case "list_files": {
-        const files = storage.getFiles();
-        return JSON.stringify(files.map((f: any) => ({ id: f.id, name: f.name, size: f.size, mimeType: f.mimeType, createdAt: f.createdAt })));
-      }
-      case "read_file": {
-        const fileText = storage.getFileText(args.id);
-        if (fileText !== null) return fileText;
-        // Check if it's an image — return description
-        const fileMeta = storage.getFiles().find((f: any) => f.id === args.id) as any;
-        if (fileMeta?.mimeType?.startsWith("image/")) {
-          return `[Image file: ${fileMeta.name}. The image is attached as visual content if in chat context.]`;
-        }
-        return JSON.stringify({ error: "File not found" });
-      }
-      case "search_files": {
-        const q = (args.query || "").toLowerCase();
-        const allFiles = storage.getFiles();
-        const matches = allFiles.filter((f: any) => f.name.toLowerCase().includes(q));
-        return JSON.stringify(matches.map((f: any) => ({ id: f.id, name: f.name, size: f.size, mimeType: f.mimeType })));
-      }
-      default: {
-        // Check if any MCP server handles this tool
-        const mcpServer = mcpManager.findServerForTool(name);
-        if (mcpServer) {
-          try {
-            const result = await mcpManager.callTool(mcpServer, name, args);
-            return result;
-          } catch (err: any) {
-            return JSON.stringify({ error: `MCP tool error: ${err.message}` });
-          }
-        }
-        return JSON.stringify({ error: `Unknown tool: ${name}` });
-      }
-    }
-  } catch (err: any) {
-    return JSON.stringify({ error: err.message });
-  }
-}
-
-function imageUrlToBase64(url: string, storage: FileStorage): { base64: string; mediaType: string } | null {
-  try {
-    // url is like /api/chat/assets/xxx.png — extract filename
-    const match = url.match(/\/api\/chat\/assets\/(.+)$/);
-    if (!match) {
-      // Also support note assets: /api/notes/:id/assets/:filename
-      const noteMatch = url.match(/\/api\/notes\/([^/]+)\/assets\/(.+)$/);
-      if (noteMatch) {
-        const buf = storage.getNoteAsset(noteMatch[1], noteMatch[2]);
-        if (!buf) return null;
-        const ext = noteMatch[2].split(".").pop()?.toLowerCase() || "png";
-        const mimeMap: Record<string, string> = {
-          png: "image/png", jpg: "image/jpeg", jpeg: "image/jpeg",
-          gif: "image/gif", webp: "image/webp", svg: "image/svg+xml", bmp: "image/bmp",
-        };
-        return { base64: buf.toString("base64"), mediaType: mimeMap[ext] || "image/png" };
-      }
-      // Support vault files: /api/files/:id/:filename
-      const fileMatch = url.match(/\/api\/files\/([^/]+)\//);
-      if (fileMatch) {
-        const fileData = storage.getFile(fileMatch[1]);
-        if (!fileData) return null;
-        const ext = fileData.name.split(".").pop()?.toLowerCase() || "png";
-        const mimeMap: Record<string, string> = {
-          png: "image/png", jpg: "image/jpeg", jpeg: "image/jpeg",
-          gif: "image/gif", webp: "image/webp", svg: "image/svg+xml", bmp: "image/bmp",
-        };
-        return { base64: fileData.buffer.toString("base64"), mediaType: mimeMap[ext] || "image/png" };
-      }
-      return null;
-    }
-    const filename = match[1];
-    const buf = storage.getChatAsset(filename);
-    if (!buf) return null;
-    const ext = filename.split(".").pop()?.toLowerCase() || "png";
-    const mimeMap: Record<string, string> = {
-      png: "image/png", jpg: "image/jpeg", jpeg: "image/jpeg",
-      gif: "image/gif", webp: "image/webp", svg: "image/svg+xml", bmp: "image/bmp",
-    };
-    return { base64: buf.toString("base64"), mediaType: mimeMap[ext] || "image/png" };
-  } catch {
-    return null;
-  }
-}
-
-function messagesToClaude(messages: AgentMessage[], storage: FileStorage): any[] {
-  return messages
-    .filter(m => m.role !== "system")
-    .map(m => {
-      if (typeof m.content === "string") {
-        return { role: m.role as "user" | "assistant", content: m.content };
-      }
-      // Convert content blocks
-      const parts: any[] = [];
-      for (const block of m.content) {
-        if (block.type === "text") {
-          parts.push({ type: "text", text: block.text });
-        } else if (block.type === "image") {
-          const data = imageUrlToBase64(block.url, storage);
-          if (data) {
-            parts.push({
-              type: "image",
-              source: { type: "base64", media_type: data.mediaType, data: data.base64 },
-            });
-          }
-        }
-      }
-      return { role: m.role as "user" | "assistant", content: parts.length > 0 ? parts : "" };
-    });
-}
-
-function messagesToOpenAI(messages: AgentMessage[], systemPrompt: string, storage: FileStorage): any[] {
-  const result: any[] = [{ role: "system", content: systemPrompt }];
-  for (const m of messages) {
-    if (typeof m.content === "string") {
-      result.push({ role: m.role, content: m.content });
-    } else {
-      // Convert content blocks to OpenAI format
-      const parts: any[] = [];
-      for (const block of m.content) {
-        if (block.type === "text") {
-          parts.push({ type: "text", text: block.text });
-        } else if (block.type === "image") {
-          const data = imageUrlToBase64(block.url, storage);
-          if (data) {
-            parts.push({
-              type: "image_url",
-              image_url: { url: `data:${data.mediaType};base64,${data.base64}` },
-            });
-          }
-        }
-      }
-      result.push({ role: m.role, content: parts.length > 0 ? parts : "" });
-    }
-  }
-  return result;
-}
-
-function buildSystemPrompt(storage: FileStorage, vaultSettings?: VaultSettings, agentSettings?: AgentSettings, userMessage?: string, contextItems?: ContextItem[], forcedSkillNames?: string[]): string {
+function buildSystemPrompt(
+  storage: FileStorage,
+  vaultSettings?: VaultSettings,
+  agentSettings?: AgentSettings,
+  userMessage?: string,
+  contextItems?: ContextItem[],
+  forcedSkillNames?: string[],
+): string {
   const allSkills = storage.getSkills();
   const relevant = selectRelevantSkills(allSkills, userMessage || "", contextItems || [], forcedSkillNames || []);
   const skillInstructions = relevant.map((s: Skill) => s.instructions).filter(Boolean).join("\n\n");
+
   const notes = storage.getNotes();
   const tasks = storage.getTasks().filter((t: any) => t.status !== "archived");
   const taskSummary = tasks.length > 0
@@ -521,21 +59,19 @@ function buildSystemPrompt(storage: FileStorage, vaultSettings?: VaultSettings, 
     ? `Notes available:\n${notes.slice(0, 15).map((n: any) => `- "${n.title}" in ${n.folder}`).join("\n")}`
     : "No notes yet.";
 
-  // Build MCP server status for all connected servers
   const toolsByServer = mcpManager.getToolsByServer();
   const mcpStatusParts: string[] = [];
-  
+
   if (mcpManager.isConnected("playwright")) {
     const browserMode = vaultSettings?.browserHeadless ? "headless (no visible window)" : "visible (browser window will open)";
     const pwTools = mcpManager.getTools("playwright");
-    mcpStatusParts.push(`**Playwright Browser** — CONNECTED (${browserMode} mode). ${pwTools.length} tools available: ${pwTools.map(t => t.name).join(", ")}.\nWhen browsing, always start with browser_snapshot to see the page accessibility tree, then use ref attributes to interact with elements.`);
+    mcpStatusParts.push(`**Playwright Browser** — CONNECTED (${browserMode} mode). ${pwTools.length} tools available: ${pwTools.map(t => t.name).join(", ")}.\nWhen browsing, always start with browser_snapshot to see the page accessibility tree, then use ref attributes to interact with elements.\n**PREFER the browser over web_fetch for ALL web access** — web_fetch is frequently blocked or returns empty results. Use browser_navigate + browser_snapshot instead.`);
   }
-  
   Array.from(toolsByServer.entries()).forEach(([serverName, tools]) => {
-    if (serverName === "playwright") return; // Already handled above
-    mcpStatusParts.push(`**${serverName}** — CONNECTED. ${tools.length} tools available: ${tools.map((t: any) => t.name).join(", ")}.`);
+    if (serverName === "playwright") return;
+    mcpStatusParts.push(`**${serverName}** — CONNECTED. ${tools.length} tools available: ${(tools as any[]).map((t: any) => t.name).join(", ")}.`);
   });
-  
+
   const mcpStatus = mcpStatusParts.length > 0
     ? mcpStatusParts.join("\n\n")
     : "No MCP servers connected. The user can add servers in Settings > MCP Servers.";
@@ -572,38 +108,23 @@ ${taskSummary}
 
 ${notesSummary}
 
-## How You Think
-You are an autonomous agent. You can take as many reasoning steps as needed to complete a task thoroughly. There is no step limit — keep working until you're done.
+## Execution Approach
+Think step by step. Before each tool call, write one sentence about what you're doing and why — this keeps reasoning clear and on-track for complex tasks. Adapt based on what you discover.
 
-### For complex tasks (specs, research, analysis, design):
-1. **Plan comprehensively**: Break the work into concrete steps. For a spec, that means: research existing solutions, identify requirements, design the format, write examples, handle edge cases, and produce a complete document.
-2. **Research first**: Use web_search and web_fetch to study existing solutions, standards, and prior art. Read multiple sources. Don't rely on memory alone — verify and expand your knowledge.
-3. **Build incrementally**: Write sections piece by piece. Use create_note or update_note to build up the document as you go, rather than trying to produce everything in one shot.
-4. **Be thorough**: A spec should be implementable. A research report should cite sources. An analysis should consider alternatives. Don't stop at surface level.
-5. **Think about what's missing**: After your first draft, ask yourself what a reader would still need to know. Add those sections.
-
-### For all tasks:
-1. **Execute, don't ask**: If the user's intent is clear, do the work. Don't ask "Would you like me to..." — just do it.
-2. **Chain tool calls**: If a search reveals interesting links, fetch them. If one source is insufficient, search for more.
-3. **Only summarize when truly done**: Do NOT generate a final text response until you have completed ALL steps. If you still have tools to call, call them.
-4. **Use notes as workspace**: For large outputs, create a note with the full content so the user can reference it later. Don't just dump everything in a chat message.
-5. **Quality over speed**: It's better to take 20 steps and produce an excellent result than to take 3 steps and produce something shallow.
+- **Execute, don't ask**: If intent is clear, start working immediately. Never ask "Would you like me to...".
+- **Think before acting**: One sentence before each tool call: what you're doing and why.
+- **Chain tools naturally**: Search reveals links → fetch. One source insufficient → search more. Discover → iterate.
+- **Adapt as you go**: No fixed plan to follow — your path changes as you learn. That's correct and expected.
+- **Only respond when fully done**: No final text response until all work is complete.
+- **Use notes as workspace**: For large outputs, create a note for later reference.
+- **Browser first for web**: Prefer the Playwright browser (browser_navigate → browser_snapshot) over web_fetch — web_fetch is frequently blocked. Only fall back if browser is not connected.
 
 Always use markdown formatting in responses.
 
 ${skillInstructions}${agentSettings?.systemPromptSuffix ? `\n\n## Custom Instructions\n${agentSettings.systemPromptSuffix}` : ""}`;
 }
 
-// ContextItem is defined above selectRelevantSkills
-
-const defaultAgentSettings: AgentSettings = {
-  maxTurns: 200,  // Safety cap only — agent stops naturally when LLM stops calling tools
-  maxTokens: 16384,
-  temperature: 0.7,
-  fetchTimeout: 30000,
-  fetchMaxLength: 50000,
-  systemPromptSuffix: "",
-};
+// ── Agent class ───────────────────────────────────────────────────────────────
 
 export class Agent {
   private messages: AgentMessage[] = [];
@@ -614,70 +135,76 @@ export class Agent {
   private vaultSettings: VaultSettings;
   private agentSettings: AgentSettings;
 
-  constructor(sessionId: string, onEvent: EventCallback, context?: ContextItem[], storage?: FileStorage, vaultSettings?: VaultSettings, agentSettings?: AgentSettings) {
+  constructor(
+    sessionId: string,
+    onEvent: EventCallback,
+    context?: ContextItem[],
+    storage?: FileStorage,
+    vaultSettings?: VaultSettings,
+    agentSettings?: AgentSettings,
+  ) {
     this.sessionId = sessionId;
     this.onEvent = onEvent;
     this.context = context || [];
     this.vaultSettings = vaultSettings || { folderPath: null, browserHeadless: false, aiModel: null };
-    // Merge saved config with defaults — ensures old saved values (e.g. maxTurns:10) don't cap the agent
+    // Merge with defaults — ensures old saved values (e.g. maxTurns:10) don't cap the agent
     this.agentSettings = { ...defaultAgentSettings, ...(agentSettings || {}) };
-    // Override maxTurns if it's the old default — users who never changed it shouldn't be stuck at 10
+    // Bump any stale low cap (pre-200 default)
     if (this.agentSettings.maxTurns <= 50) this.agentSettings.maxTurns = 200;
-    // Use provided vault-scoped storage, or import the default
     this.storage = storage || require("./storage").storage;
-    // Rebuild conversation history from persisted session events
     this.loadHistory();
   }
 
-  /**
-   * Reconstruct AgentMessage[] from the persisted ChatEvents in this session.
-   * This ensures follow-up messages have full conversation context including
-   * images from earlier turns.
-   */
+  /** Reconstruct conversation history from persisted ChatEvents (for multi-turn sessions). */
   private loadHistory() {
     const session = this.storage.getSession(this.sessionId);
-    if (!session || !session.events || session.events.length === 0) return;
+    if (!session?.events?.length) return;
 
     for (const event of session.events) {
-      if (event.type === "message") {
-        const role = event.metadata?.role as "user" | "assistant" | undefined;
-        if (!role) continue;
+      if (event.type !== "message") continue;
+      const role = event.metadata?.role as "user" | "assistant" | undefined;
+      if (!role) continue;
 
-        if (role === "user") {
-          // Check if this user message had images attached
-          const imageUrls: string[] = event.metadata?.images || [];
-          if (imageUrls.length > 0) {
-            // Reconstruct multimodal content blocks
-            const blocks: ContentBlock[] = [];
-            for (const url of imageUrls) {
-              // Guess mediaType from extension
-              const ext = url.split(".").pop()?.toLowerCase() || "png";
-              const mimeMap: Record<string, string> = {
-                png: "image/png", jpg: "image/jpeg", jpeg: "image/jpeg",
-                gif: "image/gif", webp: "image/webp",
-              };
-              blocks.push({ type: "image", url, mediaType: mimeMap[ext] || "image/png" });
-            }
-            // Extract the text portion (strip image markdown)
-            const textContent = event.content.replace(/!\[image\]\([^)]+\)\n?/g, "").trim();
-            if (textContent) {
-              blocks.push({ type: "text", text: textContent });
-            } else {
-              // Image-only: add a brief note so the LLM knows an image was analyzed
-              blocks.push({ type: "text", text: "(user sent an image)" });
-            }
-            this.messages.push({ role: "user", content: blocks });
-          } else {
-            // Pure text message
-            this.messages.push({ role: "user", content: event.content });
-          }
-        } else if (role === "assistant") {
-          this.messages.push({ role: "assistant", content: event.content });
+      if (role === "user") {
+        const imageUrls: string[] = event.metadata?.images || [];
+        if (imageUrls.length > 0) {
+          const mimeMap: Record<string, string> = {
+            png: "image/png", jpg: "image/jpeg", jpeg: "image/jpeg",
+            gif: "image/gif", webp: "image/webp",
+          };
+          const blocks: ContentBlock[] = imageUrls.map(url => ({
+            type: "image" as const,
+            url,
+            mediaType: mimeMap[url.split(".").pop()?.toLowerCase() || ""] || "image/png",
+          }));
+          const textContent = event.content.replace(/!\[image\]\([^)]+\)\n?/g, "").trim();
+          blocks.push({ type: "text", text: textContent || "(user sent an image)" });
+          this.messages.push({ role: "user", content: blocks });
+        } else {
+          this.messages.push({ role: "user", content: event.content });
         }
+      } else if (role === "assistant") {
+        this.messages.push({ role: "assistant", content: event.content });
       }
-      // We skip thought, tool_call, tool_result events for history reconstruction.
-      // The assistant's final text response already summarizes tool results,
-      // and re-including tool calls would confuse the conversation flow.
+      // thought, tool_call, tool_result events are intentionally skipped —
+      // the final assistant message already encapsulates the conversation for replay.
+    }
+  }
+
+  /**
+   * Lightweight intent extraction — one fast LLM call to understand what the user wants.
+   * Emits an "intent" thought for the UI. The actual execution adapts dynamically in the loop.
+   */
+  private async extractIntent(userMessage: string, isImageOnly: boolean): Promise<void> {
+    this.emit("thought", "Reading your request...");
+    const result = await callLLMJson(
+      `You are an intent extractor. Given a user message, write one concise sentence describing what they want to achieve. Be specific and action-oriented. Start with a verb.
+Output ONLY valid JSON: { "intent": "..." }`,
+      isImageOnly ? "(user sent an image with no text — analyze and save as note)" : userMessage,
+      150,
+    );
+    if (result?.intent) {
+      this.emit("thought", String(result.intent).trim(), { kind: "intent" });
     }
   }
 
@@ -694,61 +221,40 @@ export class Agent {
   }
 
   async run(userMessage: string, images?: Array<{ url: string; mediaType: string }>, forcedSkillNames?: string[]): Promise<void> {
-    // Build display text (shown in UI)
+    // Emit user message for display
     const displayParts: string[] = [];
-    if (images && images.length > 0) {
-      for (const img of images) {
-        displayParts.push(`![image](${img.url})`);
-      }
-    }
+    if (images?.length) images.forEach(img => displayParts.push(`![image](${img.url})`));
     if (userMessage) displayParts.push(userMessage);
     this.emit("message", displayParts.join("\n"), { role: "user", images: images?.map(i => i.url) });
 
-    // Build the actual content blocks for the LLM
+    // Build content blocks for the LLM
     const contentBlocks: ContentBlock[] = [];
-    if (images && images.length > 0) {
-      for (const img of images) {
-        contentBlocks.push({ type: "image", url: img.url, mediaType: img.mediaType });
-      }
-    }
-
-    // Tell the AI the actual image URLs so it can reference them in notes
-    if (images && images.length > 0) {
+    if (images?.length) {
+      images.forEach(img => contentBlocks.push({ type: "image", url: img.url, mediaType: img.mediaType }));
       const urlList = images.map(i => i.url).join("\n");
       contentBlocks.push({ type: "text", text: `[Image URLs for reference — use these when creating notes]\n${urlList}` });
     }
 
-    // Attach images from context notes/files so the LLM can actually see them
+    // Attach images from pinned context items
     if (this.context.length > 0) {
       const imgRegex = /!\[[^\]]*\]\((\/api\/(?:notes\/[^/]+\/assets|chat\/assets|files\/[^/]+\/[^)]+)\/[^)]*?)\)/g;
       for (const item of this.context) {
-        // For file-type context items that are images, add as image blocks
         if (item.type === "file" && item.mimeType?.startsWith("image/") && item.id) {
           const fileMeta = this.storage.getFiles().find((f: any) => f.id === item.id) as any;
-          if (fileMeta) {
-            const fileUrl = `/api/files/${fileMeta.id}/${encodeURIComponent(fileMeta.name)}`;
-            contentBlocks.push({ type: "image", url: fileUrl, mediaType: item.mimeType });
-          }
+          if (fileMeta) contentBlocks.push({ type: "image", url: `/api/files/${fileMeta.id}/${encodeURIComponent(fileMeta.name)}`, mediaType: item.mimeType });
           continue;
         }
-        // For notes, extract image markdown
         let match;
+        const mimeMap: Record<string, string> = { png: "image/png", jpg: "image/jpeg", jpeg: "image/jpeg", gif: "image/gif", webp: "image/webp" };
         while ((match = imgRegex.exec(item.content)) !== null) {
           const imgUrl = match[1];
-          const ext = imgUrl.split(".").pop()?.toLowerCase() || "png";
-          const mimeMap: Record<string, string> = {
-            png: "image/png", jpg: "image/jpeg", jpeg: "image/jpeg",
-            gif: "image/gif", webp: "image/webp",
-          };
-          contentBlocks.push({ type: "image", url: imgUrl, mediaType: mimeMap[ext] || "image/png" });
+          contentBlocks.push({ type: "image", url: imgUrl, mediaType: mimeMap[imgUrl.split(".").pop()?.toLowerCase() || ""] || "image/png" });
         }
       }
     }
 
-    // If user sent only image(s) with no text, inject auto-analysis instruction
     const effectiveMessage = userMessage || "The user pasted this image without any text. Analyze the image thoroughly: describe what you see, extract any text/data, identify key information, and then automatically save it as a note with a descriptive title. Include the image in the note content using the image URLs provided. Add relevant tags based on the content (e.g. screenshot, diagram, photo, receipt, code, whiteboard, etc). Save it in the vault.";
     contentBlocks.push({ type: "text", text: effectiveMessage });
-
     this.messages.push({ role: "user", content: contentBlocks });
 
     const { provider, model } = detectProvider();
@@ -757,227 +263,109 @@ export class Agent {
       return;
     }
 
+    const isImageOnly = !userMessage && (images?.length ?? 0) > 0;
+    await this.extractIntent(effectiveMessage, isImageOnly);
+
     let systemPrompt = buildSystemPrompt(this.storage, this.vaultSettings, this.agentSettings, effectiveMessage, this.context, forcedSkillNames);
 
-    // Inject context items into system prompt
     if (this.context.length > 0) {
-      const contextBlock = this.context.map((item, i) => {
+      const contextBlock = this.context.map(item => {
         const idStr = item.id ? ` (id: ${item.id})` : "";
-        const header = item.type === "note" ? `Note: "${item.title}"${idStr}` :
-                       item.type === "task" ? `Task: "${item.title}"${idStr}` :
-                       item.type === "file" ? `File: "${item.title}"${idStr}` :
-                       `Context: "${item.title}"`;
+        const header = item.type === "note" ? `Note: "${item.title}"${idStr}`
+          : item.type === "task" ? `Task: "${item.title}"${idStr}`
+          : item.type === "file" ? `File: "${item.title}"${idStr}`
+          : `Context: "${item.title}"`;
         return `### ${header}\n${item.content}`;
       }).join("\n\n");
       systemPrompt += `\n\n## Active Context\nThe user is viewing the following items. You already have their full content below — do NOT call read_note unless you need to refresh or read a different note. If any notes contain images, those images are attached as visual content in this conversation so you can see and analyze them. Reference context items directly when relevant.\n\n${contextBlock}`;
     }
 
     const tools = getToolDefinitions(this.storage);
+    const emit: EmitFn = this.emit.bind(this);
+    const compact = this.compactContext.bind(this);
 
     try {
-      if (provider === "claude") {
-        await this.runClaude(systemPrompt, tools, model);
-      } else {
-        await this.runOpenAI(systemPrompt, tools, model, provider);
-      }
+      await runAgentLoop(provider, model, systemPrompt, tools, this.messages, this.storage, this.agentSettings, emit, compact);
     } catch (err: any) {
       this.emit("error", `Agent error: ${err.message}`);
     }
-  }
-
-  private async runClaude(systemPrompt: string, tools: ToolDef[], model: string) {
-    const apiKey = resolveKey("anthropic");
-    const client = new Anthropic(apiKey ? { apiKey } : undefined);
-    const claudeTools: any[] = tools.map(t => ({
-      name: t.name,
-      description: t.description,
-      input_schema: t.parameters,
-    }));
-
-    let step = 0;
-    const maxTurns = this.agentSettings.maxTurns;
-    while (step < maxTurns) {
-      step++;
-      const msgs = messagesToClaude(this.messages, this.storage);
-      if (step === 1) {
-        this.emit("thought", "Thinking...");
-      } else {
-        this.emit("thought", `Working... (step ${step})`);
-      }
-
-      const response = await client.messages.create({
-        model,
-        max_tokens: this.agentSettings.maxTokens,
-        ...(this.agentSettings.temperature !== undefined ? { temperature: this.agentSettings.temperature } : {}),
-        system: systemPrompt,
-        messages: msgs,
-        tools: claudeTools.length > 0 ? claudeTools : undefined,
-      } as any);
-
-      // Track token usage
-      if ((response as any).usage) {
-        const u = (response as any).usage;
-        this.storage.addTokenUsage(u.input_tokens || 0, u.output_tokens || 0);
-      }
-
-      let hasToolUse = false;
-      let textContent = "";
-      const toolResults: Array<{ name: string; input: any; result: string }> = [];
-
-      for (const block of response.content) {
-        if (block.type === "text") {
-          textContent += block.text;
-        } else if (block.type === "tool_use") {
-          hasToolUse = true;
-          this.emit("tool_call", JSON.stringify({ name: block.name, args: block.input }), { tool: block.name });
-          const result = await executeTool(block.name, block.input as Record<string, any>, this.storage, this.agentSettings);
-          this.emit("tool_result", result, { tool: block.name });
-          toolResults.push({ name: block.name, input: block.input, result });
-        }
-      }
-
-      if (hasToolUse) {
-        // Emit any intermediate text as a thought (not a final message)
-        if (textContent) {
-          this.emit("thought", textContent);
-        }
-        // For session persistence, record tool calls and results
-        for (const tr of toolResults) {
-          this.messages.push({ role: "assistant", content: `[Tool: ${tr.name}] ${JSON.stringify(tr.input)}` });
-          this.messages.push({ role: "user", content: `[Tool Result for ${tr.name}]: ${tr.result}` });
-        }
-        // Continue the loop for the model to process results
-        continue;
-      }
-
-      // No tool use — this is the final response
-      if (textContent) {
-        this.emit("message", textContent, { role: "assistant" });
-        this.messages.push({ role: "assistant", content: textContent });
-      }
-
-      break;
-    }
 
     this.autoTitle();
   }
 
-  private async runOpenAI(systemPrompt: string, tools: ToolDef[], model: string, provider: string) {
-    const config: any = {};
-    if (provider === "grok") {
-      config.baseURL = "https://api.x.ai/v1";
-      config.apiKey = resolveKey("grok");
-    } else if (provider === "google") {
-      config.baseURL = "https://generativelanguage.googleapis.com/v1beta/openai";
-      config.apiKey = resolveKey("google");
-    } else {
-      const key = resolveKey("openai");
-      if (key) config.apiKey = key;
-    }
-    const client = new OpenAI(config);
+  private async compactContext(inputTokens: number, provider: string): Promise<boolean> {
+    const CONTEXT_WINDOW: Record<string, number> = {
+      claude: 200_000, openai: 128_000, grok: 131_072, google: 1_000_000,
+    };
+    const usageRatio = inputTokens / (CONTEXT_WINDOW[provider] ?? 128_000);
 
-    const openaiTools: any[] = tools.map(t => ({
-      type: "function",
-      function: { name: t.name, description: t.description, parameters: t.parameters },
-    }));
+    this.storage.updateSession(this.sessionId, { contextTokens: inputTokens });
 
-    let step = 0;
-    const openaiMessages: any[] = messagesToOpenAI(this.messages, systemPrompt, this.storage);
+    if (usageRatio < 0.50) return false;
 
-    const maxTurns = this.agentSettings.maxTurns;
-    while (step < maxTurns) {
-      step++;
-      if (step === 1) {
-        this.emit("thought", "Thinking...");
-      } else {
-        this.emit("thought", `Working... (step ${step})`);
-      }
+    const keepCount = 4;
+    if (this.messages.length <= keepCount) return false;
 
-      const response = await client.chat.completions.create({
-        model,
-        messages: openaiMessages,
-        tools: openaiTools.length > 0 ? openaiTools : undefined,
-        max_tokens: this.agentSettings.maxTokens,
-        ...(this.agentSettings.temperature !== undefined ? { temperature: this.agentSettings.temperature } : {}),
-      } as any);
+    const toCompact = this.messages.slice(0, this.messages.length - keepCount);
+    const toKeep = this.messages.slice(this.messages.length - keepCount);
 
-      // Track token usage
-      if (response.usage) {
-        this.storage.addTokenUsage(
-          response.usage.prompt_tokens || 0,
-          response.usage.completion_tokens || 0
-        );
-      }
+    this.emit("thought", `Context at ${Math.round(usageRatio * 100)}% — compacting conversation history to free up space...`);
 
-      const choice = response.choices[0];
-      const msg: any = choice.message;
+    const transcript = toCompact.map(m => {
+      const text = typeof m.content === "string"
+        ? m.content
+        : (m.content as any[]).filter(b => b.type === "text").map((b: any) => b.text).join(" ");
+      return `${m.role.toUpperCase()}: ${text}`;
+    }).join("\n\n");
 
-      // OpenAI can return content AND tool_calls in the same response.
-      // We need to handle both properly.
-      const hasToolCalls = msg.tool_calls && msg.tool_calls.length > 0;
+    const summary = await callLLMJson(
+      `You are a conversation summarizer. Given a transcript, produce a dense summary that preserves every fact, decision, result, and piece of created content — anything the assistant might need to continue helping. Be thorough but concise. Output ONLY valid JSON: { "summary": "..." }`,
+      transcript,
+      1500,
+    );
 
-      if (hasToolCalls) {
-        // Push the full assistant message (with tool_calls) into the OpenAI message chain.
-        // This is required for OpenAI's tool calling protocol — the assistant message
-        // containing tool_calls must precede the tool result messages.
-        openaiMessages.push(msg);
+    const summaryText = typeof summary?.summary === "string" && summary.summary.trim()
+      ? summary.summary.trim()
+      : `[Previous conversation compacted — ${toCompact.length} messages summarized]`;
 
-        // If the model also produced text content alongside tool calls, emit it
-        // but do NOT push it as a separate assistant message (it's part of the tool-call message above)
-        if (msg.content) {
-          this.emit("thought", msg.content);
-        }
+    this.messages = [
+      { role: "user", content: `[Conversation summary — context was compacted]\n\n${summaryText}` },
+      { role: "assistant", content: "Understood. I have the context from earlier in the conversation." },
+      ...toKeep,
+    ];
 
-        // Execute all tool calls (OpenAI may issue multiple in parallel)
-        for (const tc of msg.tool_calls) {
-          const fn = tc.function;
-          let args: Record<string, any>;
-          try {
-            args = JSON.parse(fn.arguments);
-          } catch {
-            args = {};
-          }
-          this.emit("tool_call", JSON.stringify({ name: fn.name, args }), { tool: fn.name });
-          const result = await executeTool(fn.name, args, this.storage, this.agentSettings);
-          this.emit("tool_result", result, { tool: fn.name });
-          openaiMessages.push({ role: "tool", tool_call_id: tc.id, content: result });
-          // Also maintain the internal message history for session persistence
-          this.messages.push({ role: "assistant", content: `[Tool: ${fn.name}] ${fn.arguments}` });
-          this.messages.push({ role: "user", content: `[Tool Result for ${fn.name}]: ${result}` });
-        }
-        // Continue the loop — the model needs to process tool results
-        continue;
-      }
-
-      // No tool calls — this is a final text response
-      if (msg.content) {
-        this.emit("message", msg.content, { role: "assistant" });
-        this.messages.push({ role: "assistant", content: msg.content });
-        openaiMessages.push({ role: "assistant", content: msg.content });
-      }
-
-      // Model is done (no tool calls = final answer)
-      break;
-    }
-
-    this.autoTitle();
+    this.emit("thought", "Context compacted — continuing with full history preserved in summary.");
+    return true;
   }
 
   private autoTitle() {
-    if (this.messages.length <= 4) {
-      const firstMsg = this.messages.find(m => m.role === "user");
-      if (firstMsg) {
-        let text = "";
-        if (typeof firstMsg.content === "string") {
-          text = firstMsg.content;
-        } else {
-          // Extract text from content blocks
-          const textBlock = firstMsg.content.find(b => b.type === "text");
-          text = textBlock?.type === "text" ? textBlock.text : "Image conversation";
-        }
-        const title = text.slice(0, 60) + (text.length > 60 ? "..." : "");
-        this.storage.updateSession(this.sessionId, { title, status: "completed" });
-      }
-    }
+    if (this.messages.length > 4) return;
+    const firstMsg = this.messages.find(m => m.role === "user");
+    if (!firstMsg) return;
+
+    const text = typeof firstMsg.content === "string"
+      ? firstMsg.content
+      : ((firstMsg.content as any[]).find(b => b.type === "text") as any)?.text || "";
+    const prompt = text.trim() || "image";
+
+    callLLMJson(
+      `You generate ultra-short chat titles. Given a user message, return a 3–5 word topic title that captures the essence of what they want. Output ONLY valid JSON: { "title": "..." }
+Rules:
+- 3 to 5 words maximum — never more
+- Title case (capitalize each main word)
+- No punctuation at the end
+- No generic phrases like "User Request" or "Help With Task"
+- Focus on the specific topic, not the action (e.g. "Paris Travel Itinerary" not "Plan a trip to Paris")
+- If it's an image with no text, use "Image Analysis" or a 3-word description of likely content`,
+      prompt,
+      100,
+    ).then(result => {
+      const title = typeof result?.title === "string" && result.title.trim()
+        ? result.title.trim().slice(0, 60)
+        : prompt.slice(0, 40) + (prompt.length > 40 ? "…" : "");
+      this.storage.updateSession(this.sessionId, { title, status: "completed" });
+    }).catch(() => {
+      this.storage.updateSession(this.sessionId, { title: prompt.slice(0, 40) + (prompt.length > 40 ? "…" : ""), status: "completed" });
+    });
   }
 }

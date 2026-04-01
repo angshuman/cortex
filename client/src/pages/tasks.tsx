@@ -1,4 +1,4 @@
-import { useState, useCallback, useMemo, useEffect } from "react";
+import { useState, useCallback, useMemo, useEffect, useRef } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { apiRequest, withVault } from "@/lib/queryClient";
 import { useVault } from "@/hooks/use-vault";
@@ -24,6 +24,7 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import {
+  Square,
   CheckSquare,
   Plus,
   Trash2,
@@ -569,6 +570,10 @@ function TaskDetailPanel({
 export default function TasksPage() {
   const [view, setView] = useState<"list" | "kanban">("list");
   const [detailTask, setDetailTask] = useState<Task | null>(null);
+  const [selectMode, setSelectMode] = useState(false);
+  const [selectedTaskIds, setSelectedTaskIds] = useState<Set<string>>(new Set());
+  const lastCheckedIdxRef = useRef<number>(-1);
+  const topLevelTasksRef = useRef<Task[]>([]);
 
   const [filterStatuses, setFilterStatuses] = useState<Set<string>>(new Set(DEFAULT_VISIBLE_STATUSES));
   const [chatOpen, setChatOpen] = useState(true);
@@ -626,6 +631,15 @@ export default function TasksPage() {
     },
   });
 
+  const bulkDeleteTasks = useCallback(async (ids: string[]) => {
+    await Promise.all(ids.map(id => apiRequest("DELETE", withVault(`/api/tasks/${id}`, vaultParam))));
+    queryClient.invalidateQueries({ queryKey: ["/api/tasks"] });
+    if (detailTask && ids.includes(detailTask.id)) setDetailTask(null);
+    setSelectedTaskIds(new Set());
+    setSelectMode(false);
+    toast({ title: `Deleted ${ids.length} task${ids.length > 1 ? "s" : ""}` });
+  }, [vaultParam, queryClient, detailTask, toast]);
+
   // Sync detailTask from fresh query data (e.g. after AI updates the task)
   useEffect(() => {
     if (!detailTask) return;
@@ -679,7 +693,34 @@ export default function TasksPage() {
   );
 
   const topLevelTasks = filteredTasks.filter(t => !t.parentId);
+  topLevelTasksRef.current = topLevelTasks;
   const getSubtasks = (parentId: string) => filteredTasks.filter(t => t.parentId === parentId);
+
+  const handleTaskItemClick = useCallback((task: Task, idx: number, e: React.MouseEvent) => {
+    const isCtrl = e.ctrlKey || e.metaKey;
+    const isShift = e.shiftKey;
+
+    if (selectMode || isCtrl || isShift) {
+      e.preventDefault();
+      if (!selectMode) setSelectMode(true);
+
+      if (isShift && lastCheckedIdxRef.current >= 0) {
+        const from = Math.min(lastCheckedIdxRef.current, idx);
+        const to = Math.max(lastCheckedIdxRef.current, idx);
+        const rangeIds = topLevelTasksRef.current.slice(from, to + 1).map(t => t.id);
+        setSelectedTaskIds(prev => { const next = new Set(prev); rangeIds.forEach(id => next.add(id)); return next; });
+      } else {
+        setSelectedTaskIds(prev => {
+          const next = new Set(prev);
+          if (next.has(task.id)) next.delete(task.id); else next.add(task.id);
+          return next;
+        });
+        lastCheckedIdxRef.current = idx;
+      }
+      return;
+    }
+    setDetailTask(task);
+  }, [selectMode]);
 
   // DnD handlers
   const handleDragStart = (event: DragStartEvent) => {
@@ -740,26 +781,37 @@ export default function TasksPage() {
   };
 
   // ============ LIST VIEW ROW ============
-  const renderListRow = (task: Task, indent = 0) => {
+  const renderListRow = (task: Task, idx: number, indent = 0) => {
     const subtasks = getSubtasks(task.id);
     const sc = statusConfig[task.status] || statusConfig.todo;
     const pc = priorityConfig[task.priority] || priorityConfig.medium;
     const StatusIcon = sc.icon;
+    const isChecked = selectedTaskIds.has(task.id);
 
     return (
       <div key={task.id} style={{ paddingLeft: indent * 24 }}>
         <div
-          className="group flex items-center gap-3 py-2.5 px-3 rounded-lg hover:bg-muted/40 transition-colors cursor-pointer"
-          onClick={() => setDetailTask(task)}
+          className={`group flex items-center gap-3 py-2.5 px-3 rounded-lg transition-colors cursor-pointer select-none ${
+            isChecked ? "bg-primary/10 border border-primary/20" : "hover:bg-muted/40 border border-transparent"
+          }`}
+          onClick={(e) => indent === 0 ? handleTaskItemClick(task, idx, e) : setDetailTask(task)}
           data-testid={`task-item-${task.id}`}
         >
-          <Checkbox
-            checked={task.status === "done"}
-            onCheckedChange={() => toggleDone(task)}
-            className="shrink-0"
-            onClick={(e) => e.stopPropagation()}
-            data-testid={`checkbox-task-${task.id}`}
-          />
+          {selectMode && indent === 0 ? (
+            <div className="shrink-0" onClick={(e) => e.stopPropagation()}>
+              {isChecked
+                ? <CheckSquare className="w-4 h-4 text-primary" onClick={(e) => { e.stopPropagation(); handleTaskItemClick(task, idx, e as any); }} />
+                : <Square className="w-4 h-4 text-muted-foreground/40" onClick={(e) => { e.stopPropagation(); handleTaskItemClick(task, idx, e as any); }} />}
+            </div>
+          ) : (
+            <Checkbox
+              checked={task.status === "done"}
+              onCheckedChange={() => toggleDone(task)}
+              className="shrink-0"
+              onClick={(e) => e.stopPropagation()}
+              data-testid={`checkbox-task-${task.id}`}
+            />
+          )}
           <StatusIcon className={`w-3.5 h-3.5 ${sc.color} shrink-0`} />
           <div className="flex-1 min-w-0 flex items-center gap-2">
             <span className={`text-[13px] font-medium truncate ${task.status === "done" ? "line-through text-muted-foreground" : "text-foreground"}`}>
@@ -794,7 +846,7 @@ export default function TasksPage() {
             )}
           </div>
         </div>
-        {subtasks.map(st => renderListRow(st, indent + 1))}
+        {subtasks.map(st => renderListRow(st, idx, indent + 1))}
       </div>
     );
   };
@@ -870,6 +922,15 @@ export default function TasksPage() {
           </Button>
           <Button
             size="sm"
+            variant={selectMode ? "secondary" : "ghost"}
+            className="text-xs gap-1"
+            onClick={() => { setSelectMode(s => !s); setSelectedTaskIds(new Set()); lastCheckedIdxRef.current = -1; }}
+            title="Select tasks (or Ctrl/Shift+click)"
+          >
+            <CheckSquare className="w-3.5 h-3.5" />
+          </Button>
+          <Button
+            size="sm"
             variant="default"
             className="text-xs gap-1"
             onClick={() => createTask.mutate({ title: "Untitled Task" })}
@@ -880,7 +941,7 @@ export default function TasksPage() {
         </div>
       </header>
 
-      <div className="flex-1 flex min-h-0">
+      <div className="flex-1 flex min-h-0 relative">
         <div className="flex-1 overflow-auto p-4">
           {view === "kanban" ? (
             <DndContext
@@ -924,10 +985,60 @@ export default function TasksPage() {
                   <p className="text-sm text-muted-foreground">No tasks yet. Create one to get started.</p>
                 </div>
               )}
-              {topLevelTasks.map(t => renderListRow(t))}
+              {topLevelTasks.map((t, idx) => renderListRow(t, idx))}
+              {/* Select-all hint row */}
+              {selectMode && topLevelTasks.length > 0 && (
+                <button
+                  onClick={() => {
+                    if (selectedTaskIds.size === topLevelTasks.length) {
+                      setSelectedTaskIds(new Set());
+                    } else {
+                      setSelectedTaskIds(new Set(topLevelTasks.map(t => t.id)));
+                      lastCheckedIdxRef.current = -1;
+                    }
+                  }}
+                  className="flex items-center gap-2 text-[11px] text-muted-foreground hover:text-foreground px-3 py-2 transition-colors w-full"
+                >
+                  {selectedTaskIds.size === topLevelTasks.length
+                    ? <CheckSquare className="w-3 h-3 text-primary" />
+                    : <Square className="w-3 h-3" />}
+                  {selectedTaskIds.size === topLevelTasks.length ? "Deselect all" : `Select all (${topLevelTasks.length})`}
+                </button>
+              )}
             </div>
           )}
         </div>
+
+        {/* Bulk action bar for tasks */}
+        {selectMode && selectedTaskIds.size > 0 && (
+          <div className="absolute bottom-0 left-0 right-0 border-t border-border/40 bg-background/95 backdrop-blur px-4 py-2 flex items-center gap-3 z-10">
+            <span className="text-[12px] text-muted-foreground flex-1">{selectedTaskIds.size} task{selectedTaskIds.size > 1 ? "s" : ""} selected</span>
+            <DropdownMenu>
+              <DropdownMenuTrigger asChild>
+                <Button size="sm" variant="ghost" className="h-7 text-xs">Set Status</Button>
+              </DropdownMenuTrigger>
+              <DropdownMenuContent align="end">
+                {Object.entries(statusConfig).filter(([k]) => k !== "archived").map(([key, cfg]) => (
+                  <DropdownMenuItem key={key} onClick={() => {
+                    const ids = Array.from(selectedTaskIds);
+                    Promise.all(ids.map(id => apiRequest("PATCH", withVault(`/api/tasks/${id}`, vaultParam), { status: key })))
+                      .then(() => { queryClient.invalidateQueries({ queryKey: ["/api/tasks"] }); setSelectedTaskIds(new Set()); setSelectMode(false); toast({ title: `Updated ${ids.length} tasks` }); });
+                  }}>
+                    <cfg.icon className={`w-3 h-3 mr-2 ${cfg.color}`} />{cfg.label}
+                  </DropdownMenuItem>
+                ))}
+              </DropdownMenuContent>
+            </DropdownMenu>
+            <Button
+              size="sm"
+              variant="destructive"
+              className="h-7 text-xs gap-1"
+              onClick={() => { if (confirm(`Delete ${selectedTaskIds.size} task${selectedTaskIds.size > 1 ? "s" : ""}?`)) bulkDeleteTasks(Array.from(selectedTaskIds)); }}
+            >
+              <Trash2 className="w-3 h-3" /> Delete
+            </Button>
+          </div>
+        )}
 
         {/* Context-aware AI chat panel */}
         {chatOpen && <ResizeHandle onMouseDown={chatPanel.onMouseDown} isResizing={chatPanel.isResizing} />}

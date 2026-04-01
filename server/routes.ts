@@ -116,6 +116,42 @@ export function registerRoutes(server: Server, app: Express) {
     res.json({ success: true });
   });
 
+  app.delete("/api/notes", (req, res) => {
+    const store = getVaultStorage(req);
+    const { ids } = req.body as { ids?: string[] };
+    if (!Array.isArray(ids) || ids.length === 0) return res.status(400).json({ error: "ids array required" });
+    const deleted = store.bulkDeleteNotes(ids);
+    res.json({ deleted });
+  });
+
+  // ============ NOTE GROUPS ============
+  app.get("/api/note-groups", (req, res) => {
+    const vaultId = req.query.vault as string | undefined;
+    const vault = vaultId ? vaultManager.getVault(vaultId) : vaultManager.getDefaultVault();
+    const store = getVaultStorage(req);
+    res.json(store.getNoteGroups(vault?.name));
+  });
+
+  app.post("/api/note-groups", (req, res) => {
+    const store = getVaultStorage(req);
+    const group = store.createNoteGroup(req.body);
+    res.status(201).json(group);
+  });
+
+  app.patch("/api/note-groups/:id", (req, res) => {
+    const store = getVaultStorage(req);
+    const group = store.updateNoteGroup(req.params.id as string, req.body);
+    if (!group) return res.status(404).json({ error: "Not found" });
+    res.json(group);
+  });
+
+  app.delete("/api/note-groups/:id", (req, res) => {
+    const store = getVaultStorage(req);
+    const ok = store.deleteNoteGroup(req.params.id as string);
+    if (!ok) return res.status(400).json({ error: "Cannot delete default group or group not found" });
+    res.json({ success: true });
+  });
+
   app.post("/api/notes/:id/assets", upload.single("file"), (req: any, res: any) => {
     const store = getVaultStorage(req);
     if (!req.file) return res.status(400).json({ error: "No file" });
@@ -554,7 +590,7 @@ export function registerRoutes(server: Server, app: Express) {
             "Content-Type": "application/json",
           },
           body: JSON.stringify({
-            model: "claude-sonnet-4-20250514",
+            model: "claude-opus-4-5",
             max_tokens: 1,
             messages: [{ role: "user", content: "hi" }],
           }),
@@ -727,7 +763,6 @@ export function registerRoutes(server: Server, app: Express) {
           const pinnedSkills: string[] = data.pinnedSkills || [];
 
           try {
-            console.log(`[Agent] Starting: session=${sessionId}, msg="${(data.message || "").slice(0, 50)}", images=${images?.length || 0}, files=${attachedFiles.length}, context=${context.length}`);
             await agent.run(data.message || "", images, pinnedSkills);
           } catch (err: any) {
             console.error(`[Agent] Error in session ${sessionId}:`, err.message);

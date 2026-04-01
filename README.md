@@ -1,5 +1,6 @@
 # Cortex — Personal AI Operating System
 
+[![npm version](https://img.shields.io/npm/v/cortex-md?style=flat-square&label=npm)](https://www.npmjs.com/package/cortex-md)
 [![GitHub Release](https://img.shields.io/github/v/release/angshuman/cortex?style=flat-square&label=Latest%20Release)](https://github.com/angshuman/cortex/releases/latest)
 [![Downloads](https://img.shields.io/github/downloads/angshuman/cortex/total?style=flat-square&label=Downloads)](https://github.com/angshuman/cortex/releases/latest)
 [![Build](https://img.shields.io/github/actions/workflow/status/angshuman/cortex/release.yml?style=flat-square&label=Build)](https://github.com/angshuman/cortex/actions)
@@ -9,6 +10,41 @@ A local-first personal operating system with an AI reasoner, note-taking, task m
 <p align="center">
   <img src="screenshots/slideshow.gif" alt="Cortex in action" width="800" />
 </p>
+
+---
+
+## Install & Run
+
+### Option 1 — npx (no install required)
+
+```bash
+npx cortex-md
+```
+
+The first run downloads Electron (~100 MB) and caches it. Subsequent runs are instant.
+
+### Option 2 — Global install
+
+```bash
+npm install -g cortex-md
+cortex-md
+```
+
+### Option 3 — Download a pre-built binary
+
+**[Go to the Releases page](https://github.com/angshuman/cortex/releases/latest)**
+
+| Platform | Architecture | Download |
+|----------|-------------|----------|
+| **Windows** | x64 / ARM64 | [Cortex-Setup.exe](https://github.com/angshuman/cortex/releases/latest/download/Cortex-Setup-1.1.1.exe) |
+| **macOS** | Apple Silicon | [Cortex-arm64.dmg](https://github.com/angshuman/cortex/releases/latest/download/Cortex-1.1.1-arm64.dmg) |
+| **macOS** | Intel | [Cortex.dmg](https://github.com/angshuman/cortex/releases/latest/download/Cortex-1.1.1.dmg) |
+| **Linux** | x64 | [Cortex.AppImage](https://github.com/angshuman/cortex/releases/latest/download/Cortex-1.1.1.AppImage) |
+| **Linux** | ARM64 | [Cortex-arm64.AppImage](https://github.com/angshuman/cortex/releases/latest/download/Cortex-1.1.1-arm64.AppImage) |
+| **Linux** | x64 (deb) | [cortex_amd64.deb](https://github.com/angshuman/cortex/releases/latest/download/cortex_1.1.1_amd64.deb) |
+| **Linux** | ARM64 (deb) | [cortex_arm64.deb](https://github.com/angshuman/cortex/releases/latest/download/cortex_1.1.1_arm64.deb) |
+
+> On first launch, a setup dialog asks for an API key (OpenAI, Anthropic, xAI, or Google Gemini). No environment variables needed.
 
 ---
 

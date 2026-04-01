@@ -1,4 +1,4 @@
-import { useState, useEffect, useRef, useCallback } from "react";
+import { useState, useEffect, useRef, useCallback, useMemo } from "react";
 import { useQueryClient } from "@tanstack/react-query";
 import { apiRequest, withVault } from "@/lib/queryClient";
 import { useVault } from "@/hooks/use-vault";
@@ -21,6 +21,8 @@ import {
   Paperclip,
   Plus,
   ArrowUp,
+  ListOrdered,
+  Check,
 } from "lucide-react";
 import { marked } from "@/lib/marked-config";
 import { useImagePaste } from "@/hooks/use-image-paste";
@@ -69,6 +71,7 @@ export function ContextChat({ context, open, onClose, placeholder, width, style,
   const mentionRef = useRef<HTMLDivElement>(null);
   const wsRef = useRef<WebSocket | null>(null);
   const pendingMessageRef = useRef<string | null>(null);
+  const hasLiveEventsRef = useRef(false);
   const scrollRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLTextAreaElement>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
@@ -124,8 +127,10 @@ export function ContextChat({ context, open, onClose, placeholder, width, style,
           queryClient.invalidateQueries({ queryKey: ["/api/notes"] });
           queryClient.invalidateQueries({ queryKey: ["/api/notes/folders"] });
           queryClient.invalidateQueries({ queryKey: ["/api/tasks"] });
+          hasLiveEventsRef.current = false;
         }
       } else {
+        hasLiveEventsRef.current = true;
         setEvents(prev => [...prev, data]);
       }
     };
@@ -286,6 +291,24 @@ export function ContextChat({ context, open, onClose, placeholder, width, style,
     });
   };
 
+  const currentActivity = useMemo(() => {
+    if (status !== "thinking") return null;
+    for (let i = events.length - 1; i >= 0; i--) {
+      const e = events[i];
+      if (e.type === "tool_call") {
+        try { return `Using ${JSON.parse(e.content).name}`; } catch {}
+      }
+      if (e.type === "tool_result") return "Processing result...";
+      if (e.type === "plan") return "Planning...";
+      if (e.type === "thought") {
+        if (e.metadata?.kind === "intent") return "Understanding...";
+        const t = e.content;
+        return t.length > 40 ? t.slice(0, 40) + "…" : t;
+      }
+    }
+    return "Thinking...";
+  }, [events, status]);
+
   const renderEvent = (event: ChatEvent, idx: number) => {
     const isUser = event.metadata?.role === "user";
 
@@ -324,63 +347,95 @@ export function ContextChat({ context, open, onClose, placeholder, width, style,
         );
 
       case "thought":
-        return (
-          <div key={event.id || idx} className="flex mb-1.5 gap-2 items-center">
-            <div className="flex-shrink-0 w-6 h-6 rounded-full bg-muted/60 flex items-center justify-center">
-              <Brain className="w-3 h-3 text-muted-foreground" />
-            </div>
-            <p className="text-[10px] text-muted-foreground/70 italic leading-none">{event.content}</p>
-          </div>
-        );
-
-      case "tool_call":
-        try {
-          const data = JSON.parse(event.content);
-          const isExpanded = expandedTools.has(event.id || String(idx));
+        if (event.metadata?.kind === "intent") {
           return (
-            <div key={event.id || idx} className="flex mb-1 gap-2 items-start">
-              <div className="flex-shrink-0 w-6 h-6 rounded-full bg-muted/60 flex items-center justify-center">
-                <Wrench className="w-3 h-3 text-muted-foreground" />
-              </div>
-              <div className="flex-1 min-w-0">
-                <button
-                  onClick={() => toggleToolExpand(event.id || String(idx))}
-                  className="flex items-center gap-1 text-[10px] text-blue-500 hover:text-blue-400"
-                >
-                  {isExpanded ? <ChevronDown className="w-2.5 h-2.5" /> : <ChevronRight className="w-2.5 h-2.5" />}
-                  <Badge variant="secondary" className="text-[9px] px-1 py-0 h-3.5 font-mono">{data.name}</Badge>
-                </button>
-                {isExpanded && (
-                  <pre className="text-[9px] text-muted-foreground bg-muted/50 rounded p-1.5 mt-0.5 overflow-x-auto">
-                    {JSON.stringify(data.args, null, 2)}
-                  </pre>
-                )}
+            <div key={event.id || idx} className="mb-2 rounded-lg bg-primary/5 border border-primary/20 px-3 py-2">
+              <div className="flex items-start gap-2">
+                <Brain className="w-3.5 h-3.5 text-primary/50 mt-0.5 shrink-0" />
+                <div>
+                  <p className="text-[9px] font-semibold text-primary/60 uppercase tracking-wider mb-0.5">Understanding</p>
+                  <p className="text-xs text-foreground/80 leading-snug">{event.content}</p>
+                </div>
               </div>
             </div>
           );
-        } catch { return null; }
-
-      case "tool_result":
-        const isExp = expandedTools.has(event.id || String(idx));
+        }
         return (
           <div key={event.id || idx} className="flex mb-1.5 gap-2 items-start">
-            <div className="flex-shrink-0 w-6" />
-            <div className="flex-1 min-w-0">
-              <button
-                onClick={() => toggleToolExpand(event.id || String(idx))}
-                className="flex items-center gap-1 text-[10px] text-muted-foreground hover:text-foreground"
-              >
-                {isExp ? <ChevronDown className="w-2.5 h-2.5" /> : <ChevronRight className="w-2.5 h-2.5" />}
-                <span>Result</span>
-              </button>
-              {isExp && (
-                <pre className="text-[9px] text-muted-foreground bg-muted/50 rounded p-1.5 mt-0.5 overflow-x-auto max-h-24">
-                  {(() => { try { return JSON.stringify(JSON.parse(event.content), null, 2); } catch { return event.content; } })()}
-                </pre>
-              )}
+            <div className="flex-shrink-0 w-6 flex justify-center pt-1.5">
+              <div className="w-1.5 h-1.5 rounded-full bg-muted-foreground/40" />
             </div>
+            <p className="text-[10px] text-muted-foreground/80 leading-relaxed">{event.content}</p>
           </div>
         );
+
+      case "plan": {
+        const steps: string[] = event.metadata?.steps || event.content.split("\n").filter(Boolean);
+        const isCollapsed = expandedTools.has(`collapsed-${event.id || idx}`);
+        return (
+          <div key={event.id || idx} className="mb-2 rounded-lg border border-border/60 overflow-hidden">
+            <button
+              onClick={() => toggleToolExpand(`collapsed-${event.id || idx}`)}
+              className="w-full flex items-center gap-2 px-3 py-1.5 bg-muted/30 hover:bg-muted/50 transition-colors text-left border-b border-border/40"
+            >
+              <ListOrdered className="w-3 h-3 text-foreground/50 shrink-0" />
+              <span className="text-[10px] font-semibold text-foreground/70">{event.metadata?.revised ? "Revised Plan" : "Plan"}</span>
+              <span className="text-[10px] text-muted-foreground ml-1">— {steps.length} steps</span>
+              <span className="ml-auto">{isCollapsed ? <ChevronRight className="w-3 h-3 text-muted-foreground" /> : <ChevronDown className="w-3 h-3 text-muted-foreground" />}</span>
+            </button>
+            {!isCollapsed && (
+              <ol className="px-3 py-2 space-y-1.5">
+                {steps.map((step, i) => (
+                  <li key={i} className="flex items-start gap-2">
+                    <span className="shrink-0 w-4 h-4 rounded-full bg-muted border border-border/50 flex items-center justify-center text-[9px] font-bold text-muted-foreground mt-0.5">{i + 1}</span>
+                    <span className="text-xs text-foreground/75 leading-snug">{step}</span>
+                  </li>
+                ))}
+              </ol>
+            )}
+          </div>
+        );
+      }
+
+      case "tool_call": {
+        try {
+          const data = JSON.parse(event.content);
+          const args = data.args || {};
+          const PRIORITY_KEYS = ["url", "query", "title", "name", "path", "id", "keyword"];
+          const inlineKey = PRIORITY_KEYS.find(k => args[k]) || Object.keys(args)[0];
+          const inlineVal = inlineKey ? String(args[inlineKey]).slice(0, 55) : "";
+          return (
+            <div key={event.id || idx} className="mb-1 flex items-center gap-1.5 px-2 py-0.5 rounded bg-muted/20 border border-border/30 text-[10px] text-muted-foreground">
+              <Wrench className="w-2.5 h-2.5 shrink-0 opacity-50" />
+              <code className="font-mono font-medium text-foreground/70">{data.name}</code>
+              {inlineVal && <span className="opacity-50 truncate">{inlineVal}</span>}
+            </div>
+          );
+        } catch { return null; }
+      }
+
+      case "tool_result": {
+        const isExp = expandedTools.has(event.id || String(idx));
+        const firstLine = event.content.split("\n").find(l => l.trim()) || event.content;
+        const preview = firstLine.slice(0, 70) + (event.content.length > 70 ? "…" : "");
+        return (
+          <div key={event.id || idx} className="mb-1">
+            <button
+              onClick={() => toggleToolExpand(event.id || String(idx))}
+              className="flex items-center gap-1.5 px-2 py-0.5 rounded bg-muted/10 border border-border/20 text-[10px] text-muted-foreground hover:bg-muted/20 transition-colors w-full text-left"
+            >
+              <Check className="w-2.5 h-2.5 text-green-500/60 shrink-0" />
+              <span className="truncate opacity-60">{preview}</span>
+              {event.content.length > 70 && <span className="ml-auto shrink-0 opacity-40">{isExp ? "▲" : "▼"}</span>}
+            </button>
+            {isExp && (
+              <pre className="text-[10px] text-muted-foreground bg-muted/10 px-2.5 py-1.5 overflow-x-auto max-h-32 rounded-b border border-t-0 border-border/20 leading-relaxed">
+                {event.content}
+              </pre>
+            )}
+          </div>
+        );
+      }
 
       case "error":
         return (
@@ -451,10 +506,10 @@ export function ContextChat({ context, open, onClose, placeholder, width, style,
         {events.map((e, i) => renderEvent(e, i))}
         {status === "thinking" && (
           <div className="flex mb-2 gap-2 items-center">
-            <div className="flex-shrink-0 w-6 h-6 rounded-full bg-muted/60 flex items-center justify-center">
-              <Loader2 className="w-3 h-3 text-muted-foreground animate-spin" />
+            <div className="flex-shrink-0 w-6 flex justify-center">
+              <Loader2 className="w-3 h-3 text-muted-foreground/60 animate-spin" />
             </div>
-            <span className="text-[10px] text-muted-foreground/60 leading-none">Thinking...</span>
+            <span className="text-[10px] text-muted-foreground/70 leading-none">{currentActivity}</span>
           </div>
         )}
       </div>
