@@ -109,10 +109,10 @@ ${taskSummary}
 ${notesSummary}
 
 ## Execution Approach
-Think step by step. Before each tool call, write one sentence about what you're doing and why — this keeps reasoning clear and on-track for complex tasks. Adapt based on what you discover.
+**Start immediately with tool calls. Never write a planning response as your first output.**
 
-- **Execute, don't ask**: If intent is clear, start working immediately. Never ask "Would you like me to...".
-- **Think before acting**: One sentence before each tool call: what you're doing and why.
+- **Act first**: Your first output must be a tool call, not text. Use tools to gather information, create content, or take action.
+- **Reason inline**: Use brief thoughts *between* tool calls to explain what you just learned and what you'll do next — not before the first action.
 - **Chain tools naturally**: Search reveals links → fetch. One source insufficient → search more. Discover → iterate.
 - **Adapt as you go**: No fixed plan to follow — your path changes as you learn. That's correct and expected.
 - **Only respond when fully done**: No final text response until all work is complete.
