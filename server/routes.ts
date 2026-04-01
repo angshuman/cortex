@@ -4,6 +4,7 @@ import { WebSocketServer, WebSocket } from "ws";
 import { vaultManager, FileStorage } from "./storage";
 import { Agent, type ContextItem } from "./agent";
 import { mcpManager } from "./mcp-client";
+import { log, logError } from "./index";
 import multer from "multer";
 import path from "path";
 
@@ -414,7 +415,7 @@ export function registerRoutes(server: Server, app: Express) {
       try {
         await mcpManager.initFromConfig(config, false);
       } catch (e) {
-        console.error("[MCP] Failed to re-init after config change:", e);
+        logError("[MCP] Failed to re-init after config change:", e);
       }
     }
     
@@ -644,7 +645,7 @@ export function registerRoutes(server: Server, app: Express) {
       }
       exec(cmd, (err: any) => {
         if (err) {
-          console.error("[open-folder]", err.message);
+          logError("[open-folder]", err);
           return res.status(500).json({ error: err.message });
         }
         res.json({ ok: true });
@@ -680,7 +681,7 @@ export function registerRoutes(server: Server, app: Express) {
       console.log("[MCP] No MCP servers connected (configure in Settings > General)");
     }
   }).catch(err => {
-    console.error("[MCP] Auto-init failed:", err.message);
+    logError("[MCP] Auto-init failed", err);
   });
 
   // ============ WEBSOCKET ============
@@ -729,7 +730,7 @@ export function registerRoutes(server: Server, app: Express) {
           const globalConfig = vaultManager.getConfig();
           const headless = vaultSettings?.browserHeadless ?? false;
           mcpManager.initFromConfig(globalConfig, headless).catch(err => {
-            console.error("[MCP] Auto-connect on chat failed:", err.message);
+            logError("[MCP] Auto-connect on chat failed", err);
           });
 
           const context: ContextItem[] = data.context || [];
@@ -765,14 +766,14 @@ export function registerRoutes(server: Server, app: Express) {
           try {
             await agent.run(data.message || "", images, pinnedSkills);
           } catch (err: any) {
-            console.error(`[Agent] Error in session ${sessionId}:`, err.message);
+            logError(`[Agent] session=${sessionId}`, err);
             broadcast({ type: "error", content: err.message });
           } finally {
             broadcast({ type: "status", content: "done" });
           }
         }
       } catch (err) {
-        console.error("[WS] Message handling error:", err);
+        logError("[WS] Message handling error:", err);
       }
     });
 
@@ -783,3 +784,5 @@ export function registerRoutes(server: Server, app: Express) {
     });
   });
 }
+
+

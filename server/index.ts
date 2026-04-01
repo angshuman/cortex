@@ -30,8 +30,20 @@ export function log(message: string, source = "express") {
     second: "2-digit",
     hour12: true,
   });
-
   console.log(`${formattedTime} [${source}] ${message}`);
+}
+
+export function logError(message: string, err?: any) {
+  const formattedTime = new Date().toLocaleTimeString("en-US", {
+    hour: "numeric",
+    minute: "2-digit",
+    second: "2-digit",
+    hour12: true,
+  });
+  const detail = err
+    ? ` — ${err?.message ?? String(err)}${err?.stack ? `\n${err.stack}` : ""}`
+    : "";
+  console.error(`\x1b[31m${formattedTime} [error] ${message}${detail}\x1b[0m`);
 }
 
 app.use((req, res, next) => {
@@ -60,7 +72,7 @@ app.use((req, res, next) => {
     const status = err.status || err.statusCode || 500;
     const message = err.message || "Internal Server Error";
 
-    console.error("Internal Server Error:", err);
+    logError("Internal Server Error", err);
 
     if (res.headersSent) {
       return next(err);

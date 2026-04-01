@@ -5,6 +5,9 @@ import type { AgentSettings } from "@shared/schema";
 import type { AgentMessage, ToolDef, EmitFn } from "./agent-types";
 import { resolveKey, supportsExtendedThinking, messagesToClaude, messagesToOpenAI } from "./agent-llm";
 import { executeTool } from "./agent-tools";
+import { log, logError } from "./index";
+
+const LLM_TIMEOUT_MS = 120_000; // 2 min hard timeout per LLM call
 
 /**
  * The agentic loop — Think → Act → Observe, repeated until the model stops calling tools.
@@ -48,7 +51,8 @@ async function runClaude(
   emit: EmitFn,
   compactContext: (inputTokens: number, provider: string) => Promise<boolean>,
 ): Promise<void> {
-  const client = new Anthropic({ apiKey: resolveKey("anthropic") });
+  const client = new Anthropic({ apiKey: resolveKey("anthropic"), timeout: LLM_TIMEOUT_MS });
+  log(`[agent] claude loop start — model=${model} maxTurns=${agentSettings.maxTurns}`);
 
   const claudeTools: any[] = tools.map(t => ({
     name: t.name,
@@ -87,7 +91,9 @@ async function runClaude(
     }
 
     // ── Think ──────────────────────────────────────────────────────────────
+    log(`[agent] claude step=${step} calling LLM`);
     const response = await client.messages.create(params as any);
+    log(`[agent] claude step=${step} got response stop_reason=${response.stop_reason}`);
 
     if ((response as any).usage) {
       const u = (response as any).usage;
@@ -123,12 +129,22 @@ async function runClaude(
 
       const toolResults: any[] = [];
       for (const toolBlock of toolUseBlocks) {
+        log(`[agent] claude tool=${toolBlock.name}`);
         emit("tool_call", JSON.stringify({ name: toolBlock.name, args: toolBlock.input }), { tool: toolBlock.name });
-        const result = await executeTool(toolBlock.name, toolBlock.input as Record<string, any>, storage, agentSettings);
-        emit("tool_result", result, { tool: toolBlock.name });
-        toolResults.push({ type: "tool_result", tool_use_id: toolBlock.id, content: result });
-        messages.push({ role: "assistant", content: `[Tool: ${toolBlock.name}] ${JSON.stringify(toolBlock.input)}` });
-        messages.push({ role: "user", content: `[Tool Result for ${toolBlock.name}]: ${result}` });
+        try {
+          const result = await executeTool(toolBlock.name, toolBlock.input as Record<string, any>, storage, agentSettings);
+          emit("tool_result", result, { tool: toolBlock.name });
+          toolResults.push({ type: "tool_result", tool_use_id: toolBlock.id, content: result });
+          messages.push({ role: "assistant", content: `[Tool: ${toolBlock.name}] ${JSON.stringify(toolBlock.input)}` });
+          messages.push({ role: "user", content: `[Tool Result for ${toolBlock.name}]: ${result}` });
+        } catch (toolErr: any) {
+          logError(`[agent] claude tool=${toolBlock.name} failed`, toolErr);
+          const errMsg = JSON.stringify({ error: toolErr.message ?? String(toolErr) });
+          emit("tool_result", errMsg, { tool: toolBlock.name });
+          toolResults.push({ type: "tool_result", tool_use_id: toolBlock.id, content: errMsg });
+          messages.push({ role: "assistant", content: `[Tool: ${toolBlock.name}] ${JSON.stringify(toolBlock.input)}` });
+          messages.push({ role: "user", content: `[Tool Result for ${toolBlock.name}]: ${errMsg}` });
+        }
       }
 
       // Full content (including thinking blocks) must be preserved — Anthropic requirement
@@ -164,7 +180,7 @@ async function runOpenAI(
   emit: EmitFn,
   compactContext: (inputTokens: number, provider: string) => Promise<boolean>,
 ): Promise<void> {
-  const config: any = {};
+  const config: any = { timeout: LLM_TIMEOUT_MS };
   if (provider === "grok") {
     config.baseURL = "https://api.x.ai/v1";
     config.apiKey = resolveKey("grok");
@@ -176,6 +192,7 @@ async function runOpenAI(
     if (key) config.apiKey = key;
   }
   const client = new OpenAI(config);
+  log(`[agent] openai loop start — provider=${provider} model=${model} maxTurns=${agentSettings.maxTurns}`);
 
   const openaiTools: any[] = tools.map(t => ({
     type: "function",
@@ -191,6 +208,7 @@ async function runOpenAI(
     emit("thought", step === 1 ? "Thinking..." : `Working... (step ${step})`);
 
     // ── Think ──────────────────────────────────────────────────────────────
+    log(`[agent] openai step=${step} calling LLM`);
     const response = await client.chat.completions.create({
       model,
       messages: openaiMessages,
@@ -198,6 +216,9 @@ async function runOpenAI(
       max_tokens: agentSettings.maxTokens,
       ...(agentSettings.temperature !== undefined ? { temperature: agentSettings.temperature } : {}),
     } as any);
+
+    const finishReason = response.choices[0]?.finish_reason;
+    log(`[agent] openai step=${step} got response finish_reason=${finishReason}`);
 
     if (response.usage) {
       storage.addTokenUsage(response.usage.prompt_tokens || 0, response.usage.completion_tokens || 0);
@@ -216,12 +237,22 @@ async function runOpenAI(
         let args: Record<string, any>;
         try { args = JSON.parse(fn.arguments); } catch { args = {}; }
 
+        log(`[agent] openai tool=${fn.name}`);
         emit("tool_call", JSON.stringify({ name: fn.name, args }), { tool: fn.name });
-        const result = await executeTool(fn.name, args, storage, agentSettings);
-        emit("tool_result", result, { tool: fn.name });
-        openaiMessages.push({ role: "tool", tool_call_id: tc.id, content: result });
-        messages.push({ role: "assistant", content: `[Tool: ${fn.name}] ${fn.arguments}` });
-        messages.push({ role: "user", content: `[Tool Result for ${fn.name}]: ${result}` });
+        try {
+          const result = await executeTool(fn.name, args, storage, agentSettings);
+          emit("tool_result", result, { tool: fn.name });
+          openaiMessages.push({ role: "tool", tool_call_id: tc.id, content: result });
+          messages.push({ role: "assistant", content: `[Tool: ${fn.name}] ${fn.arguments}` });
+          messages.push({ role: "user", content: `[Tool Result for ${fn.name}]: ${result}` });
+        } catch (toolErr: any) {
+          logError(`[agent] openai tool=${fn.name} failed`, toolErr);
+          const errMsg = JSON.stringify({ error: toolErr.message ?? String(toolErr) });
+          emit("tool_result", errMsg, { tool: fn.name });
+          openaiMessages.push({ role: "tool", tool_call_id: tc.id, content: errMsg });
+          messages.push({ role: "assistant", content: `[Tool: ${fn.name}] ${fn.arguments}` });
+          messages.push({ role: "user", content: `[Tool Result for ${fn.name}]: ${errMsg}` });
+        }
       }
       continue; // loop back to Think
     }
@@ -231,6 +262,8 @@ async function runOpenAI(
       emit("message", msg.content, { role: "assistant" });
       messages.push({ role: "assistant", content: msg.content });
       openaiMessages.push({ role: "assistant", content: msg.content });
+    } else {
+      logError(`[agent] openai step=${step} finish_reason=${finishReason} — empty response, no tool calls`);
     }
     loopCompleted = true;
     break;

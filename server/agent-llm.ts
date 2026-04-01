@@ -2,7 +2,8 @@ import Anthropic from "@anthropic-ai/sdk";
 import OpenAI from "openai";
 import { FileStorage } from "./storage";
 import type { AgentSettings } from "@shared/schema";
-import type { AgentMessage, ContentBlock, ToolDef } from "./agent-types";
+import { logError } from "./index";
+
 
 // ── Provider detection ────────────────────────────────────────────────────────
 
@@ -79,7 +80,7 @@ export async function callLLMJson(systemPrompt: string, userPrompt: string, maxT
     const clean = text.replace(/^```(?:json)?\n?/m, "").replace(/\n?```$/m, "").trim();
     return JSON.parse(clean);
   } catch (err: any) {
-    console.error("[LLM] callLLMJson failed:", err.message);
+    logError("[LLM] callLLMJson failed", err);
     return null;
   }
 }
