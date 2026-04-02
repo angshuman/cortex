@@ -1,6 +1,6 @@
 {
   "name": "cortex-md",
-  "version": "1.2.0",
+  "version": "1.2.1",
   "type": "module",
   "license": "MIT",
   "description": "AI-first personal workspace — drop in questions, tasks, and ideas; Cortex researches, reasons, and organizes privately on your machine",
