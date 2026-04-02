@@ -1,6 +1,6 @@
 {
   "name": "cortex-md",
-  "version": "1.1.14",
+  "version": "1.2.0",
   "type": "module",
   "license": "MIT",
   "description": "Personal AI operating system — local-first, portable, with notes, tasks, chat, and MCP support",
