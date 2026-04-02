@@ -193,9 +193,10 @@ export class Agent {
 
   /**
    * Lightweight intent extraction — one fast LLM call to understand what the user wants.
-   * Emits an "intent" thought for the UI. The actual execution adapts dynamically in the loop.
+   * Emits an "intent" thought for the UI and returns the intent string so the
+   * loop can use it to stay on track and verify completion.
    */
-  private async extractIntent(userMessage: string, isImageOnly: boolean): Promise<void> {
+  private async extractIntent(userMessage: string, isImageOnly: boolean): Promise<string | null> {
     this.emit("thought", "Reading your request...");
     const result = await callLLMJson(
       `You are an intent extractor. Given a user message, write one concise sentence describing what they want to achieve. Be specific and action-oriented. Start with a verb.
@@ -204,8 +205,11 @@ Output ONLY valid JSON: { "intent": "..." }`,
       150,
     );
     if (result?.intent) {
-      this.emit("thought", String(result.intent).trim(), { kind: "intent" });
+      const intent = String(result.intent).trim();
+      this.emit("thought", intent, { kind: "intent" });
+      return intent;
     }
+    return null;
   }
 
   private emit(type: ChatEvent["type"], content: string, metadata?: Record<string, any>) {
@@ -264,9 +268,15 @@ Output ONLY valid JSON: { "intent": "..." }`,
     }
 
     const isImageOnly = !userMessage && (images?.length ?? 0) > 0;
-    await this.extractIntent(effectiveMessage, isImageOnly);
+    const intent = await this.extractIntent(effectiveMessage, isImageOnly);
 
     let systemPrompt = buildSystemPrompt(this.storage, this.vaultSettings, this.agentSettings, effectiveMessage, this.context, forcedSkillNames);
+
+    // Inject the extracted intent so the model has a clear goal on every loop turn
+    // and can verify it has actually been met before producing a final response.
+    if (intent) {
+      systemPrompt += `\n\n## Your Goal for This Request\n${intent}\n\nBefore writing your final response, verify this goal has been fully achieved. If not, continue using tools.`;
+    }
 
     if (this.context.length > 0) {
       const contextBlock = this.context.map(item => {
