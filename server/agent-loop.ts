@@ -2,7 +2,7 @@ import Anthropic from "@anthropic-ai/sdk";
 import OpenAI from "openai";
 import { FileStorage } from "./storage";
 import type { AgentSettings } from "@shared/schema";
-import type { AgentMessage, ToolDef, EmitFn } from "./agent-types";
+import type { AgentMessage, ToolDef, EmitFn, AskUserFn } from "./agent-types";
 import { resolveKey, supportsExtendedThinking, messagesToClaude, messagesToOpenAI } from "./agent-llm";
 import { executeTool } from "./agent-tools";
 import { log, logError } from "./index";
@@ -31,11 +31,12 @@ export async function runAgentLoop(
   agentSettings: AgentSettings,
   emit: EmitFn,
   compactContext: (inputTokens: number, provider: string) => Promise<boolean>,
+  askUserFn?: AskUserFn,
 ): Promise<void> {
   if (provider === "claude") {
-    await runClaude(systemPrompt, tools, model, messages, storage, agentSettings, emit, compactContext);
+    await runClaude(systemPrompt, tools, model, messages, storage, agentSettings, emit, compactContext, askUserFn);
   } else {
-    await runOpenAI(systemPrompt, tools, model, provider, messages, storage, agentSettings, emit, compactContext);
+    await runOpenAI(systemPrompt, tools, model, provider, messages, storage, agentSettings, emit, compactContext, askUserFn);
   }
 }
 
@@ -50,6 +51,7 @@ async function runClaude(
   agentSettings: AgentSettings,
   emit: EmitFn,
   compactContext: (inputTokens: number, provider: string) => Promise<boolean>,
+  askUserFn?: AskUserFn,
 ): Promise<void> {
   const client = new Anthropic({ apiKey: resolveKey("anthropic"), timeout: LLM_TIMEOUT_MS });
   log(`[agent] claude loop start — model=${model} maxTurns=${agentSettings.maxTurns}`);
@@ -131,6 +133,21 @@ async function runClaude(
       for (const toolBlock of toolUseBlocks) {
         log(`[agent] claude tool=${toolBlock.name}`);
         emit("tool_call", JSON.stringify({ name: toolBlock.name, args: toolBlock.input }), { tool: toolBlock.name });
+
+        // ask_clarification — pause loop and await user response
+        if (toolBlock.name === "ask_clarification") {
+          const question = (toolBlock.input as any).question as string;
+          const choices = (toolBlock.input as any).choices as string[] | undefined;
+          const answer = askUserFn
+            ? await askUserFn(question, choices)
+            : "(No user available to answer)";
+          emit("tool_result", answer, { tool: toolBlock.name });
+          toolResults.push({ type: "tool_result", tool_use_id: toolBlock.id, content: answer });
+          messages.push({ role: "assistant", content: `[Tool: ask_clarification] ${JSON.stringify(toolBlock.input)}` });
+          messages.push({ role: "user", content: `[User answered]: ${answer}` });
+          continue;
+        }
+
         try {
           const result = await executeTool(toolBlock.name, toolBlock.input as Record<string, any>, storage, agentSettings);
           emit("tool_result", result, { tool: toolBlock.name });
@@ -179,6 +196,7 @@ async function runOpenAI(
   agentSettings: AgentSettings,
   emit: EmitFn,
   compactContext: (inputTokens: number, provider: string) => Promise<boolean>,
+  askUserFn?: AskUserFn,
 ): Promise<void> {
   const config: any = { timeout: LLM_TIMEOUT_MS };
   if (provider === "grok") {
@@ -239,6 +257,19 @@ async function runOpenAI(
 
         log(`[agent] openai tool=${fn.name}`);
         emit("tool_call", JSON.stringify({ name: fn.name, args }), { tool: fn.name });
+
+        // ask_clarification — pause loop and await user response
+        if (fn.name === "ask_clarification") {
+          const answer = askUserFn
+            ? await askUserFn(args.question as string, args.choices as string[] | undefined)
+            : "(No user available to answer)";
+          emit("tool_result", answer, { tool: fn.name });
+          openaiMessages.push({ role: "tool", tool_call_id: tc.id, content: answer });
+          messages.push({ role: "assistant", content: `[Tool: ask_clarification] ${fn.arguments}` });
+          messages.push({ role: "user", content: `[User answered]: ${answer}` });
+          continue;
+        }
+
         try {
           const result = await executeTool(fn.name, args, storage, agentSettings);
           emit("tool_result", result, { tool: fn.name });

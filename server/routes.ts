@@ -5,12 +5,16 @@ import { vaultManager, FileStorage } from "./storage";
 import { Agent, type ContextItem } from "./agent";
 import { mcpManager } from "./mcp-client";
 import { log, logError } from "./index";
+import type { AskUserFn } from "./agent-types";
 import multer from "multer";
 import path from "path";
 
 const upload = multer({ storage: multer.memoryStorage(), limits: { fileSize: 10 * 1024 * 1024 } });
 
 const activeAgents = new Map<string, { agent: Agent | null; ws: Set<WebSocket> }>();
+
+/** Pending ask_clarification resolvers — keyed by sessionId. Resolved when the client sends a clarification_response. */
+const pendingClarifications = new Map<string, (answer: string) => void>();
 
 /**
  * Resolve the FileStorage for a request.
@@ -704,6 +708,15 @@ export function registerRoutes(server: Server, app: Express) {
           }
         }
 
+        // User answered a clarifying question — resolve the pending promise in the agent loop
+        if (data.type === "clarification_response" && data.sessionId) {
+          const resolve = pendingClarifications.get(data.sessionId);
+          if (resolve) {
+            pendingClarifications.delete(data.sessionId);
+            resolve(data.answer || "");
+          }
+        }
+
         if (data.type === "chat" && data.sessionId && (data.message || data.images || data.files)) {
           const sessionId = data.sessionId;
           const vaultId = data.vaultId; // Frontend sends active vault ID
@@ -763,12 +776,27 @@ export function registerRoutes(server: Server, app: Express) {
           const images: Array<{ url: string; mediaType: string }> | undefined = data.images;
           const pinnedSkills: string[] = data.pinnedSkills || [];
 
+          // askUserFn: pauses the loop and waits for the user to answer a clarifying question
+          const askUserFn: AskUserFn = (question, choices) => {
+            return new Promise<string>((resolve) => {
+              pendingClarifications.set(sessionId, resolve);
+              broadcast({
+                id: crypto.randomUUID(),
+                type: "question",
+                content: question,
+                metadata: { choices },
+                timestamp: new Date().toISOString(),
+              });
+            });
+          };
+
           try {
-            await agent.run(data.message || "", images, pinnedSkills);
+            await agent.run(data.message || "", images, pinnedSkills, askUserFn);
           } catch (err: any) {
             logError(`[Agent] session=${sessionId}`, err);
             broadcast({ type: "error", content: err.message });
           } finally {
+            pendingClarifications.delete(sessionId); // clean up if agent errored while waiting
             broadcast({ type: "status", content: "done" });
           }
         }

@@ -7,6 +7,24 @@ export function getToolDefinitions(storage: FileStorage): ToolDef[] {
   const skills = storage.getSkills().filter((s: Skill) => s.enabled);
   const tools: ToolDef[] = [];
 
+  // Built-in tool — always available, not skill-based
+  tools.push({
+    name: "ask_clarification",
+    description: "Ask the user a clarifying question when a key piece of information is missing and cannot be reasonably assumed. Use sparingly — only when truly needed. Optionally provide multiple choices; the user can pick one or write their own answer.",
+    parameters: {
+      type: "object" as const,
+      properties: {
+        question: { type: "string", description: "The clarifying question to ask the user." },
+        choices: {
+          type: "array",
+          items: { type: "string" },
+          description: "Optional list of suggested choices. The user can select one or provide a custom answer.",
+        },
+      },
+      required: ["question"],
+    },
+  });
+
   // Collect skill-defined tool names to avoid duplicates with MCP
   const skillToolNames = new Set<string>();
 

@@ -26,6 +26,7 @@ import {
   Paperclip,
   Check,
   ListOrdered,
+  HelpCircle,
 } from "lucide-react";
 import { marked } from "@/lib/marked-config";
 import { useImagePaste } from "@/hooks/use-image-paste";
@@ -69,6 +70,8 @@ export default function ChatPage() {
   } = useImagePaste(vaultParam);
   const [isDragging, setIsDragging] = useState(false);
   const [attachedFiles, setAttachedFiles] = useState<Array<{ id: string; name: string; mimeType: string }>>([]); 
+  const [pendingQuestion, setPendingQuestion] = useState<{ id: string; question: string; choices?: string[] } | null>(null);
+  const [questionAnswer, setQuestionAnswer] = useState("");
 
   // Skills
   const { data: skills = [] } = useQuery<Skill[]>({
@@ -125,6 +128,8 @@ export default function ChatPage() {
       if (data.type === "status") {
         setStatus(data.content === "thinking" ? "thinking" : data.content === "done" ? "idle" : "idle");
         if (data.content === "done") {
+          setPendingQuestion(null);
+          setQuestionAnswer("");
           queryClient.invalidateQueries({ queryKey: ["/api/chat/sessions"] });
           queryClient.invalidateQueries({ queryKey: ["/api/notes"] });
           queryClient.invalidateQueries({ queryKey: ["/api/notes/folders"] });
@@ -132,6 +137,11 @@ export default function ChatPage() {
           // Allow session refetch to sync final state
           hasLiveEventsRef.current = false;
         }
+      } else if (data.type === "question") {
+        hasLiveEventsRef.current = true;
+        setEvents(prev => [...prev, data]);
+        setPendingQuestion({ id: data.id, question: data.content, choices: data.metadata?.choices });
+        setQuestionAnswer("");
       } else {
         hasLiveEventsRef.current = true;
         setEvents(prev => [...prev, data]);
@@ -220,6 +230,24 @@ export default function ChatPage() {
       handleSend();
     }
   };
+
+  const handleQuestionSubmit = useCallback((answer: string) => {
+    if (!pendingQuestion || !answer.trim()) return;
+    const ws = wsRef.current;
+    if (ws && ws.readyState === WebSocket.OPEN) {
+      ws.send(JSON.stringify({ type: "clarification_response", sessionId, answer: answer.trim() }));
+    }
+    // Show the answer inline as a user message
+    setEvents(prev => [...prev, {
+      id: crypto.randomUUID(),
+      type: "message",
+      content: answer.trim(),
+      metadata: { role: "user" },
+      timestamp: new Date().toISOString(),
+    }]);
+    setPendingQuestion(null);
+    setQuestionAnswer("");
+  }, [pendingQuestion, sessionId]);
 
   const toggleToolExpand = (id: string) => {
     setExpandedTools(prev => {
@@ -410,6 +438,58 @@ export default function ChatPage() {
           </div>
         );
 
+      case "question": {
+        const isActive = pendingQuestion?.id === event.id;
+        const choices: string[] = event.metadata?.choices || [];
+        return (
+          <div key={event.id || idx} className="mb-4 rounded-xl border border-primary/30 bg-primary/5 overflow-hidden">
+            <div className="flex items-start gap-2.5 px-3.5 py-2.5">
+              <HelpCircle className="w-4 h-4 text-primary/60 shrink-0 mt-0.5" />
+              <div className="flex-1 min-w-0">
+                <p className="text-[10px] font-semibold text-primary/60 uppercase tracking-wider mb-1">Clarification needed</p>
+                <p className="text-sm text-foreground/90 leading-snug">{event.content}</p>
+              </div>
+            </div>
+            {isActive && (
+              <div className="px-3.5 pb-3 space-y-2">
+                {choices.length > 0 && (
+                  <div className="flex flex-wrap gap-1.5">
+                    {choices.map((c, i) => (
+                      <button
+                        key={i}
+                        onClick={() => handleQuestionSubmit(c)}
+                        className="px-3 py-1.5 rounded-lg border border-primary/30 bg-primary/10 hover:bg-primary/20 text-xs text-foreground/80 transition-colors"
+                      >
+                        {c}
+                      </button>
+                    ))}
+                  </div>
+                )}
+                <div className="flex gap-2 mt-1">
+                  <input
+                    type="text"
+                    value={questionAnswer}
+                    onChange={(e) => setQuestionAnswer(e.target.value)}
+                    onKeyDown={(e) => { if (e.key === "Enter") handleQuestionSubmit(questionAnswer); }}
+                    placeholder={choices.length > 0 ? "Or type a custom answer..." : "Type your answer..."}
+                    autoFocus
+                    className="flex-1 text-sm bg-background border border-border/50 rounded-lg px-3 py-1.5 focus:outline-none focus:ring-1 focus:ring-primary/50 placeholder:text-muted-foreground/50"
+                  />
+                  <Button
+                    size="sm"
+                    onClick={() => handleQuestionSubmit(questionAnswer)}
+                    disabled={!questionAnswer.trim()}
+                    className="shrink-0"
+                  >
+                    <ArrowUp className="w-3.5 h-3.5" />
+                  </Button>
+                </div>
+              </div>
+            )}
+          </div>
+        );
+      }
+
       default:
         return null;
     }
@@ -448,7 +528,7 @@ export default function ChatPage() {
         <span className="text-sm font-medium truncate">
           {session?.title || "New Chat"}
         </span>
-        {status === "thinking" && currentActivity && (
+        {status === "thinking" && !pendingQuestion && currentActivity && (
           <div className="flex items-center gap-1.5 ml-auto text-xs text-muted-foreground">
             <Loader2 className="w-3 h-3 animate-spin shrink-0" />
             <span className="truncate max-w-[200px]">{currentActivity}</span>
@@ -473,7 +553,7 @@ export default function ChatPage() {
             </div>
           )}
           {events.map((e, i) => renderEvent(e, i))}
-          {status === "thinking" && (
+          {status === "thinking" && !pendingQuestion && (
             <div className="flex items-center gap-2.5 mb-3 mt-1">
               <div className="flex-shrink-0 w-7 flex justify-center">
                 <Loader2 className="w-3.5 h-3.5 text-muted-foreground/60 animate-spin" />

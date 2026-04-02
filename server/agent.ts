@@ -4,7 +4,7 @@ import { mcpManager } from "./mcp-client";
 import type { ChatEvent, Skill, VaultSettings, AgentSettings } from "@shared/schema";
 import {
   defaultAgentSettings,
-  type EventCallback, type EmitFn,
+  type EventCallback, type EmitFn, type AskUserFn,
   type ContextItem, type ContentBlock, type AgentMessage, type ToolDef,
 } from "./agent-types";
 import { detectProvider, callLLMJson } from "./agent-llm";
@@ -224,7 +224,7 @@ Output ONLY valid JSON: { "intent": "..." }`,
     this.storage.addChatEvent(this.sessionId, event);
   }
 
-  async run(userMessage: string, images?: Array<{ url: string; mediaType: string }>, forcedSkillNames?: string[]): Promise<void> {
+  async run(userMessage: string, images?: Array<{ url: string; mediaType: string }>, forcedSkillNames?: string[], askUserFn?: AskUserFn): Promise<void> {
     // Emit user message for display
     const displayParts: string[] = [];
     if (images?.length) images.forEach(img => displayParts.push(`![image](${img.url})`));
@@ -295,7 +295,7 @@ Output ONLY valid JSON: { "intent": "..." }`,
     const compact = this.compactContext.bind(this);
 
     try {
-      await runAgentLoop(provider, model, systemPrompt, tools, this.messages, this.storage, this.agentSettings, emit, compact);
+      await runAgentLoop(provider, model, systemPrompt, tools, this.messages, this.storage, this.agentSettings, emit, compact, askUserFn);
     } catch (err: any) {
       this.emit("error", `Agent error: ${err.message}`);
     }

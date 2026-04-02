@@ -5,6 +5,12 @@ export type EventCallback = (event: ChatEvent) => void;
 /** Higher-level emit used by the runner functions — handles UUID + persistence internally. */
 export type EmitFn = (type: ChatEvent["type"], content: string, metadata?: Record<string, any>) => void;
 
+/**
+ * Called by the loop when the model invokes `ask_clarification`.
+ * Emits a question event to the UI and awaits the user's response.
+ */
+export type AskUserFn = (question: string, choices?: string[]) => Promise<string>;
+
 export interface ContextItem {
   type: "note" | "task" | "text" | "file";
   title: string;

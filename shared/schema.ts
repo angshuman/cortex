@@ -107,7 +107,7 @@ export type InsertTask = z.infer<typeof insertTaskSchema>;
 // ============ CHAT ============
 export const chatEventSchema = z.object({
   id: z.string(),
-  type: z.enum(["thought", "action", "action_result", "message", "error", "plan", "tool_call", "tool_result"]),
+  type: z.enum(["thought", "action", "action_result", "message", "error", "plan", "tool_call", "tool_result", "question"]),
   content: z.string(),
   metadata: z.record(z.any()).optional(),
   timestamp: z.string(),
