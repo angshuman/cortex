@@ -144,16 +144,22 @@ export default function ChatPage() {
     };
 
     ws.onclose = () => {
-      wsRef.current = null;
-      // If the connection drops while the agent is running, recover:
-      // reset status and let the session query reload the final state from the server.
-      setStatus(s => s === "thinking" ? "idle" : s);
-      hasLiveEventsRef.current = false;
+      // Only treat this as a real connection drop if we're still on this session.
+      // If wsRef.current !== ws it means the cleanup already ran (navigation to
+      // another session nulled the ref before closing) — don't interfere with
+      // the new session's state.
+      if (wsRef.current === ws) {
+        wsRef.current = null;
+        setStatus(s => s === "thinking" ? "idle" : s);
+        hasLiveEventsRef.current = false;
+      }
     };
 
     return () => {
-      ws.close();
+      // Null the ref BEFORE closing so that the onclose handler above can
+      // distinguish navigation-close from a real drop.
       wsRef.current = null;
+      ws.close();
     };
   }, [sessionId]);
 
