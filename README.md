@@ -1,11 +1,11 @@
-# Cortex — Personal AI Operating System
+# Cortex — AI-first Personal Workspace
 
 [![npm version](https://img.shields.io/npm/v/cortex-md?style=flat-square&label=npm)](https://www.npmjs.com/package/cortex-md)
 [![GitHub Release](https://img.shields.io/github/v/release/angshuman/cortex?style=flat-square&label=Latest%20Release)](https://github.com/angshuman/cortex/releases/latest)
 [![Downloads](https://img.shields.io/github/downloads/angshuman/cortex/total?style=flat-square&label=Downloads)](https://github.com/angshuman/cortex/releases/latest)
 [![Build](https://img.shields.io/github/actions/workflow/status/angshuman/cortex/release.yml?style=flat-square&label=Build)](https://github.com/angshuman/cortex/actions)
 
-A local-first personal operating system with an AI reasoner, note-taking, task management, file handling, and browser automation via MCP. Your data stays on your machine.
+Drop in your questions, tasks, and ideas. Cortex researches, reasons through them, and keeps everything organized — privately on your machine.
 
 <p align="center">
   <img src="screenshots/slideshow.gif" alt="Cortex in action" width="800" />

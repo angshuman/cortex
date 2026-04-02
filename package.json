@@ -3,7 +3,7 @@
   "version": "1.2.0",
   "type": "module",
   "license": "MIT",
-  "description": "Personal AI operating system — local-first, portable, with notes, tasks, chat, and MCP support",
+  "description": "AI-first personal workspace — drop in questions, tasks, and ideas; Cortex researches, reasons, and organizes privately on your machine",
   "author": "Angshuman Sarkar <s42.ang@gmail.com>",
   "main": "dist/electron/main.cjs",
   "bin": {
