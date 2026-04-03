@@ -108,16 +108,26 @@ ${taskSummary}
 
 ${notesSummary}
 
-## Execution Approach
-**Start immediately with tool calls. Never write a planning response as your first output.**
+## Execution Approach — Gather → Critique → Act → Observe → Revise
 
-- **Act first**: Your first output must be a tool call, not text. Use tools to gather information, create content, or take action.
-- **Reason inline**: Use brief thoughts *between* tool calls to explain what you just learned and what you'll do next — not before the first action.
-- **Chain tools naturally**: Search reveals links → fetch. One source insufficient → search more. Discover → iterate.
-- **Adapt as you go**: No fixed plan to follow — your path changes as you learn. That's correct and expected.
-- **Only respond when fully done**: No final text response until all work is complete.
-- **Use notes as workspace**: For large outputs, create a note for later reference.
-- **Browser first for web**: Prefer the Playwright browser (browser_navigate → browser_snapshot) over web_fetch — web_fetch is frequently blocked. Only fall back if browser is not connected.
+**Every task follows this deliberate sequence:**
+
+**1. Gather first.** Before writing a single word or making any change, collect context. Read relevant notes, search for information, fetch what exists — in parallel where possible. Never build before you understand what's there.
+
+**2. Critique before building.** After gathering, reason about what you found. Say what the situation is, what's missing, what problems you see, and what approach you'll take. Write this out — a sentence or a paragraph — before moving to action. This is the think step: it surfaces issues before they become mistakes.
+
+**3. Act with intention.** Now execute: write, create, update, search, or call. Do the real work based on your critique, not on assumptions.
+
+**4. Observe your output.** After creating or modifying something important, verify it. Read back what you wrote. Check for correctness, completeness, and quality. Catch issues before declaring done — don't ship without inspecting.
+
+**5. Revise surgically.** If something needs fixing, make targeted edits — not rewrites. Each correction is small and specific. Incremental improvement, not starting over.
+
+**Practical rules:**
+- **Parallel reads**: when you need multiple pieces of context, gather them all in one round of tool calls
+- **Think out loud**: after gathering, write your analysis before the next tool call — even one sentence helps
+- **Verify**: after creating something substantial (note, code, plan), read it back with a tool call to confirm it's right
+- **Browser first for web**: use Playwright browser_navigate → browser_snapshot over web_fetch (web_fetch is frequently blocked by sites)
+- **Notes as workspace**: for large or complex outputs, create a note to build into rather than generating everything in one shot
 
 Always use markdown formatting in responses.
 
@@ -275,7 +285,7 @@ Output ONLY valid JSON: { "intent": "..." }`,
     // Inject the extracted intent so the model has a clear goal on every loop turn
     // and can verify it has actually been met before producing a final response.
     if (intent) {
-      systemPrompt += `\n\n## Your Goal for This Request\n${intent}\n\nBefore writing your final response, verify this goal has been fully achieved. If not, continue using tools.`;
+      systemPrompt += `\n\n## Your Goal for This Request\n${intent}\n\nBefore writing your final response: verify this goal has been fully achieved. Read back what you created or found. If it's incomplete or wrong, continue with targeted fixes.`;
     }
 
     if (this.context.length > 0) {

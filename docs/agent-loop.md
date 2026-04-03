@@ -68,16 +68,47 @@ The system prompt is assembled fresh for each request from these sections:
 
 ### Execution Approach (verbatim)
 ```
-**Start immediately with tool calls. Never write a planning response as your first output.**
+## Execution Approach — Gather → Critique → Act → Observe → Revise
 
-- **Act first**: Your first output must be a tool call, not text.
-- **Reason inline**: Use brief thoughts *between* tool calls — not before the first action.
-- **Chain tools naturally**: Search reveals links → fetch. One source insufficient → search more.
-- **Adapt as you go**: No fixed plan — your path changes as you learn.
-- **Only respond when fully done**: No final text response until all work is complete.
-- **Use notes as workspace**: For large outputs, create a note for later reference.
-- **Browser first for web**: Prefer browser_navigate → browser_snapshot over web_fetch.
+Every task follows this deliberate sequence:
+
+1. Gather first. Before writing a single word or making any change, collect context.
+   Read relevant notes, search for information, fetch what exists — in parallel where
+   possible. Never build before you understand what's there.
+
+2. Critique before building. After gathering, reason about what you found. Say what
+   the situation is, what's missing, what problems you see, and what approach you'll
+   take. Write this out before moving to action. This is the think step.
+
+3. Act with intention. Execute: write, create, update, search, or call. Do the real
+   work based on your critique, not on assumptions.
+
+4. Observe your output. After creating or modifying something important, verify it.
+   Read back what you wrote. Check for correctness, completeness, and quality before
+   declaring done.
+
+5. Revise surgically. If something needs fixing, make targeted edits — not rewrites.
+   Each correction is small and specific. Incremental improvement, not starting over.
+
+Practical rules:
+- Parallel reads: gather multiple pieces of context in one round of tool calls
+- Think out loud: after gathering, write your analysis before the next tool call
+- Verify: after creating something substantial, read it back with a tool call
+- Browser first for web: browser_navigate → browser_snapshot over web_fetch
+- Notes as workspace: for large outputs, build into a note rather than one shot
 ```
+
+### Why the previous "act first" rule was removed
+
+The old rule said "your first output must be a tool call." This caused the model to jump
+into building without understanding what already existed — creating duplicates, missing
+context, writing generic content instead of targeted content.
+
+The new pattern lets the model gather → critique → act, which means:
+- It reads what's already there before writing more
+- It surfaces problems *before* making changes (not after)
+- The critique text is emitted as a `thought` event (text alongside tool calls) so the
+  loop continues — text-only output still ends the loop as before
 
 ---
 
