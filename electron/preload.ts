@@ -11,4 +11,6 @@ contextBridge.exposeInMainWorld("cortexDesktop", {
   },
   /** Open a folder in the native file manager (Explorer / Finder) */
   openFolder: (folderPath: string) => ipcRenderer.invoke("open-folder", folderPath),
+  /** Show native folder picker dialog — returns selected path or null if cancelled */
+  pickFolder: () => ipcRenderer.invoke("pick-folder"),
 });

@@ -159,6 +159,7 @@ export function AppSidebar() {
   const [showRenameDialog, setShowRenameDialog] = useState(false);
   const [showDeleteConfirm, setShowDeleteConfirm] = useState(false);
   const [dialogName, setDialogName] = useState("");
+  const [dialogFolder, setDialogFolder] = useState("");
   const [editingVault, setEditingVault] = useState<Vault | null>(null);
 
   const { data: sessions } = useQuery({
@@ -183,12 +184,14 @@ export function AppSidebar() {
         name: dialogName.trim(),
         icon: dialogName.trim().charAt(0).toUpperCase(),
         color: "#64748b",
+        settings: dialogFolder.trim() ? { folderPath: dialogFolder.trim() } : undefined,
       });
       const vault = await res.json();
       refetchVaults();
       setActiveVaultId(vault.id);
       setShowCreateDialog(false);
       setDialogName("");
+      setDialogFolder("");
       setLocation("/chat");
     } catch {}
   };
@@ -382,8 +385,8 @@ export function AppSidebar() {
       </Sidebar>
 
       {/* Create Vault Dialog */}
-      <Dialog open={showCreateDialog} onOpenChange={setShowCreateDialog}>
-        <DialogContent className="sm:max-w-[400px]">
+      <Dialog open={showCreateDialog} onOpenChange={(open) => { setShowCreateDialog(open); if (!open) { setDialogName(""); setDialogFolder(""); } }}>
+        <DialogContent className="sm:max-w-[420px]">
           <DialogHeader>
             <DialogTitle className="text-base">Create Vault</DialogTitle>
           </DialogHeader>
@@ -399,6 +402,42 @@ export function AppSidebar() {
                 autoFocus
                 onKeyDown={e => { if (e.key === "Enter") handleCreateVault(); }}
               />
+            </div>
+            <div>
+              <label className="text-xs text-muted-foreground mb-1.5 block">Folder <span className="text-muted-foreground/60">(optional)</span></label>
+              <div className="flex gap-2">
+                <div className="flex-1 flex items-center gap-2 border border-input rounded-md px-3 py-1.5 bg-background text-sm min-w-0">
+                  <FolderOpen className="w-3.5 h-3.5 text-muted-foreground shrink-0" />
+                  <span className={`truncate text-xs ${dialogFolder ? "text-foreground font-mono" : "text-muted-foreground/60"}`}>
+                    {dialogFolder || "Default location"}
+                  </span>
+                </div>
+                <Button
+                  type="button"
+                  size="sm"
+                  variant="outline"
+                  className="shrink-0 h-8 text-xs"
+                  onClick={async () => {
+                    const desktop = (window as any).cortexDesktop;
+                    if (desktop?.pickFolder) {
+                      const picked = await desktop.pickFolder();
+                      if (picked) setDialogFolder(picked);
+                    }
+                  }}
+                >
+                  Browse
+                </Button>
+                {dialogFolder && (
+                  <Button type="button" size="sm" variant="ghost" className="shrink-0 h-8 px-2" onClick={() => setDialogFolder("")}>
+                    ✕
+                  </Button>
+                )}
+              </div>
+              <p className="text-[10px] text-muted-foreground mt-1.5">
+                {dialogFolder
+                  ? `Cortex data will be stored in .cortex-data/ inside the selected folder.`
+                  : "Leave empty to use the default location inside Cortex's data directory."}
+              </p>
             </div>
           </div>
           <DialogFooter>

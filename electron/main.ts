@@ -280,6 +280,18 @@ app.on("ready", async () => {
     return "Invalid path";
   });
 
+  // IPC: Show native folder picker dialog
+  ipcMain.handle("pick-folder", async () => {
+    if (!mainWindow) return null;
+    const result = await dialog.showOpenDialog(mainWindow, {
+      properties: ["openDirectory", "createDirectory"],
+      title: "Select Vault Folder",
+      buttonLabel: "Select Folder",
+    });
+    if (result.canceled || result.filePaths.length === 0) return null;
+    return result.filePaths[0];
+  });
+
   try {
     serverPort = await findAvailablePort();
     console.log(`[Cortex] Starting server on port ${serverPort}...`);

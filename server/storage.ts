@@ -851,13 +851,14 @@ export class VaultManager {
   // ============ STORAGE ACCESS ============
 
   /**
-   * Resolve the filesystem directory for a vault.
-   * If vault has a folderPath in settings, use that external path.
-   * Otherwise fall back to .cortex-data/vaults/<slug>/
+   * Resolve the filesystem directory for a vault's data.
+   * - If vault has a folderPath, data lives at <folderPath>/.cortex-data/
+   *   so Cortex metadata stays self-contained within the user's chosen folder.
+   * - Otherwise fall back to .cortex-data/vaults/<slug>/
    */
   private resolveVaultDir(vault: Vault): string {
     if (vault.settings?.folderPath) {
-      return vault.settings.folderPath;
+      return path.join(vault.settings.folderPath, ".cortex-data");
     }
     return path.join(this.vaultsDir, vault.slug);
   }

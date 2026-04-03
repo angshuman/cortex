@@ -55,14 +55,21 @@ import { useToast } from "@/hooks/use-toast";
 import { ApiKeySetupDialog } from "@/components/api-key-dialog";
 /** Open a folder in the native file manager (Explorer / Finder) */
 async function openFolder(folderPath: string) {
-  // Prefer Electron IPC if available
   const desktop = (window as any).cortexDesktop;
   if (desktop?.openFolder) {
     await desktop.openFolder(folderPath);
   } else {
-    // Fallback to server-side endpoint
     await apiRequest("POST", "/api/open-folder", { folderPath });
   }
+}
+
+/** Show native folder picker — returns the selected path or null */
+async function pickFolder(): Promise<string | null> {
+  const desktop = (window as any).cortexDesktop;
+  if (desktop?.pickFolder) {
+    return desktop.pickFolder();
+  }
+  return null;
 }
 
 interface Skill {
@@ -484,11 +491,6 @@ function VaultSettingsCard({
     await saveSettings({ browserHeadless: checked });
   };
 
-  const handleSaveFolderPath = async () => {
-    const value = folderPath.trim() || null;
-    await saveSettings({ folderPath: value });
-  };
-
   const handleSaveAiModel = async () => {
     const value = aiModel.trim() || null;
     await saveSettings({ aiModel: value });
@@ -507,14 +509,14 @@ function VaultSettingsCard({
           </div>
           <div className="flex items-center gap-1.5 mt-0.5">
             <p className="text-[10px] text-muted-foreground font-mono truncate">
-              {pathInfo?.path || "loading..."}
+              {pathInfo?.rootFolder || pathInfo?.path || "loading..."}
             </p>
             {pathInfo?.path && (
               <Button
                 variant="ghost"
                 size="icon"
                 className="h-4 w-4 shrink-0 text-muted-foreground hover:text-primary"
-                onClick={() => openFolder(pathInfo.path)}
+                onClick={() => openFolder(pathInfo.rootFolder || pathInfo.path)}
                 title="Open vault folder"
               >
                 <ExternalLink className="w-2.5 h-2.5" />
@@ -525,34 +527,54 @@ function VaultSettingsCard({
       </div>
 
       <div className="space-y-4">
-        {/* Folder Path */}
+        {/* Folder */}
         <div>
           <Label className="text-xs text-muted-foreground flex items-center gap-1.5 mb-1.5">
             <FolderOpen className="w-3 h-3" />
-            Data Folder
+            Vault Folder
           </Label>
           <div className="flex gap-2">
-            <Input
-              className="text-xs h-8 font-mono flex-1"
-              placeholder="Default (inside .cortex-data)"
-              value={folderPath}
-              onChange={(e) => setFolderPath(e.target.value)}
-              onKeyDown={(e) => { if (e.key === "Enter") handleSaveFolderPath(); }}
-              data-testid={`input-vault-folder-${vault.slug}`}
-            />
+            <div className="flex-1 flex items-center gap-2 border border-input rounded-md px-3 py-1.5 bg-muted/20 min-w-0">
+              <span className={`truncate text-xs font-mono ${folderPath ? "text-foreground" : "text-muted-foreground/60"}`}>
+                {folderPath || "Default location"}
+              </span>
+            </div>
             <Button
               size="sm"
               variant="outline"
-              className="h-8 text-xs px-3"
-              onClick={handleSaveFolderPath}
+              className="h-8 text-xs shrink-0"
+              onClick={async () => {
+                const picked = await pickFolder();
+                if (picked !== null) {
+                  setFolderPath(picked);
+                  await saveSettings({ folderPath: picked || null });
+                }
+              }}
               disabled={saving}
               data-testid={`button-save-folder-${vault.slug}`}
             >
-              {saving ? "..." : "Save"}
+              Browse
             </Button>
+            {folderPath && (
+              <Button
+                size="sm"
+                variant="ghost"
+                className="h-8 px-2 text-xs shrink-0 text-muted-foreground hover:text-destructive"
+                onClick={async () => {
+                  setFolderPath("");
+                  await saveSettings({ folderPath: null });
+                }}
+                disabled={saving}
+                title="Reset to default location"
+              >
+                ✕
+              </Button>
+            )}
           </div>
           <p className="text-[10px] text-muted-foreground mt-1">
-            Absolute path to an external folder (e.g. D:\CortexVaults\work or ~/Google Drive/cortex-work). Leave empty for default location.
+            {folderPath
+              ? `Cortex data is stored in .cortex-data/ inside this folder.`
+              : "Using default location inside Cortex's data directory. Click Browse to point to any folder on your computer."}
           </p>
         </div>
 

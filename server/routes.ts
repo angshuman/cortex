@@ -71,7 +71,10 @@ export function registerRoutes(server: Server, app: Express) {
     if (!vault) return res.status(404).json({ error: "Vault not found" });
     try {
       const storage = vaultManager.getStorage(vault.id);
-      res.json({ path: storage.getDataDir() });
+      res.json({
+        path: storage.getDataDir(),
+        rootFolder: vault.settings?.folderPath || null,
+      });
     } catch (err: any) {
       res.status(500).json({ error: err.message });
     }
