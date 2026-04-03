@@ -29,15 +29,113 @@ function slugify(name: string): string {
     .replace(/^-|-$/g, "") || "vault";
 }
 
+// ── Markdown / frontmatter helpers (used by external vault mode) ──────────────
+
+/**
+ * Parse YAML-like frontmatter from a markdown file.
+ * Handles: string values, booleans, inline arrays [a, b, c], and multi-line lists.
+ * Compatible with Obsidian frontmatter conventions.
+ */
+function parseFrontmatter(content: string): { meta: Record<string, any>; body: string } {
+  const fmMatch = content.match(/^---\r?\n([\s\S]*?)\r?\n?---\r?\n?([\s\S]*)$/);
+  if (!fmMatch) return { meta: {}, body: content };
+
+  const meta: Record<string, any> = {};
+  const lines = fmMatch[1].split("\n");
+  let i = 0;
+  while (i < lines.length) {
+    const line = lines[i];
+    if (!line.trim()) { i++; continue; }
+
+    // Inline array:  key: [val1, val2]
+    const inlineArr = line.match(/^([\w-]+):\s*\[(.*)]\s*$/);
+    if (inlineArr) {
+      meta[inlineArr[1]] = inlineArr[2]
+        .split(",")
+        .map(s => s.trim().replace(/^["']|["']$/g, ""))
+        .filter(Boolean);
+      i++; continue;
+    }
+
+    // Multi-line list:  key:\n  - val1\n  - val2
+    const multiArr = line.match(/^([\w-]+):\s*$/);
+    if (multiArr && i + 1 < lines.length && /^\s*-\s/.test(lines[i + 1])) {
+      const vals: string[] = [];
+      i++;
+      while (i < lines.length && /^\s*-\s/.test(lines[i])) {
+        vals.push(lines[i].replace(/^\s*-\s*/, "").trim().replace(/^["']|["']$/g, ""));
+        i++;
+      }
+      meta[multiArr[1]] = vals;
+      continue;
+    }
+
+    // Simple key: value
+    const kv = line.match(/^([\w-]+):\s*(.+)$/);
+    if (kv) {
+      const val = kv[2].trim().replace(/^["']|["']$/g, "");
+      meta[kv[1]] = val === "true" ? true : val === "false" ? false : val;
+    }
+    i++;
+  }
+  return { meta, body: fmMatch[2] };
+}
+
+/** Serialize metadata to YAML frontmatter block. */
+function serializeFrontmatter(meta: Record<string, any>): string {
+  const lines = ["---"];
+  for (const [key, val] of Object.entries(meta)) {
+    if (val === null || val === undefined) continue;
+    if (Array.isArray(val)) {
+      lines.push(`${key}: [${val.map(v => `"${v}"`).join(", ")}]`);
+    } else if (typeof val === "boolean") {
+      lines.push(`${key}: ${val}`);
+    } else {
+      lines.push(`${key}: ${val}`);
+    }
+  }
+  lines.push("---");
+  return lines.join("\n") + "\n";
+}
+
+/** Recursively walk a directory, calling callback for each file. Skips hidden directories. */
+function walkDir(dir: string, callback: (filePath: string) => void): void {
+  if (!fs.existsSync(dir)) return;
+  for (const entry of fs.readdirSync(dir, { withFileTypes: true })) {
+    if (entry.name.startsWith(".")) continue; // skip .cortex-data, .git, .obsidian etc.
+    const full = path.join(dir, entry.name);
+    if (entry.isDirectory()) walkDir(full, callback);
+    else callback(full);
+  }
+}
+
+/** Deterministic ID for a .md file that has no cortex_id frontmatter. Based on relative path. */
+function pathToNoteId(relativePath: string): string {
+  const norm = relativePath.replace(/\\/g, "/");
+  let h = 0;
+  for (let i = 0; i < norm.length; i++) { h = Math.imul(31, h) + norm.charCodeAt(i) | 0; }
+  return "ext-" + Math.abs(h).toString(36);
+}
+
+/** Sanitize a note title to a safe filename (no slashes, no reserved chars). */
+function sanitizeFilename(title: string): string {
+  return title.replace(/[/\\:*?"<>|]/g, "-").replace(/\s+/g, " ").trim() || "untitled";
+}
+
 /**
  * FileStorage: operates within a single vault directory.
  * All notes, tasks, chat, skills are scoped to this directory.
  */
 export class FileStorage {
   private dataDir: string;
+  /** Root folder for external vaults (e.g. an Obsidian vault). When set, notes are .md files here. */
+  private rootFolder: string | null;
+  /** Cache: note ID → absolute .md file path. Populated during scanMdFiles(). */
+  private mdPathCache = new Map<string, string>();
 
-  constructor(dataDir: string) {
+  constructor(dataDir: string, rootFolder?: string | null) {
     this.dataDir = dataDir;
+    this.rootFolder = rootFolder || null;
     this.initVaultDirs();
   }
 
@@ -59,8 +157,148 @@ export class FileStorage {
 
   getDataDir(): string { return this.dataDir; }
 
-  // ============ NOTE GROUPS ============
+  /** True when this vault points to an external folder (notes live as .md files there). */
+  isExternalVault(): boolean { return !!this.rootFolder; }
+
+  // ── External vault: .md file helpers ────────────────────────────────────────
+
+  /**
+   * Scan all .md files in rootFolder and return them as Note objects.
+   * Populates mdPathCache for fast subsequent lookups.
+   */
+  private scanMdFiles(): Note[] {
+    if (!this.rootFolder) return [];
+    this.mdPathCache.clear();
+    const notes: Note[] = [];
+    walkDir(this.rootFolder, (filePath) => {
+      if (!filePath.endsWith(".md")) return;
+      const rel = path.relative(this.rootFolder!, filePath);
+      try {
+        const note = this.parseMdNote(filePath, rel);
+        notes.push(note);
+        this.mdPathCache.set(note.id, filePath);
+      } catch { /* skip unreadable files */ }
+    });
+    return notes.sort((a, b) => b.updatedAt.localeCompare(a.updatedAt));
+  }
+
+  /** Parse a single .md file into a Note. Title is derived from first # heading or filename. */
+  private parseMdNote(filePath: string, relativePath: string): Note {
+    const raw = fs.readFileSync(filePath, "utf-8");
+    const { meta, body } = parseFrontmatter(raw);
+
+    // Stable ID: cortex_id from frontmatter, or deterministic hash of path
+    const id = (meta.cortex_id as string) || pathToNoteId(relativePath);
+
+    // Title: from first heading, or filename
+    const headingMatch = body.match(/^#\s+(.+)$/m);
+    const title = headingMatch
+      ? headingMatch[1].trim()
+      : path.basename(relativePath, ".md");
+
+    // Folder: derived from directory relative to rootFolder
+    const dir = path.dirname(relativePath);
+    const folder = dir === "." ? "/" : "/" + dir.replace(/\\/g, "/");
+
+    // Tags: support cortex tags AND Obsidian tags
+    const tags: string[] = Array.isArray(meta.tags) ? meta.tags
+      : Array.isArray(meta.tag) ? meta.tag : [];
+
+    const stat = fs.statSync(filePath);
+    return {
+      id,
+      title,
+      content: body,
+      folder,
+      groupId: (meta.groupId as string) || "default",
+      tags,
+      attachments: Array.isArray(meta.attachments) ? meta.attachments : [],
+      pinned: !!(meta.pinned),
+      createdAt: (meta.created as string) || stat.birthtime.toISOString(),
+      updatedAt: (meta.updated as string) || stat.mtime.toISOString(),
+    };
+  }
+
+  /**
+   * Compute the intended .md file path for a note.
+   * Used only when CREATING a new note (preserves original path on updates).
+   */
+  private noteMdPath(note: Pick<Note, "title" | "folder">): string {
+    const folderPart = note.folder === "/" ? "" : note.folder.replace(/^\//, "");
+    const dir = folderPart ? path.join(this.rootFolder!, folderPart) : this.rootFolder!;
+    return path.join(dir, `${sanitizeFilename(note.title)}.md`);
+  }
+
+  /**
+   * Write a Note to its .md file (creates new file).
+   * For updates to existing files, use updateMdNoteFile() which preserves the original path.
+   */
+  private writeMdNote(note: Note): void {
+    if (!this.rootFolder) return;
+    const filePath = this.noteMdPath(note);
+    ensureDir(path.dirname(filePath));
+    const meta: Record<string, any> = { cortex_id: note.id, created: note.createdAt, updated: note.updatedAt };
+    if (note.tags.length > 0) meta.tags = note.tags;
+    if (note.pinned) meta.pinned = note.pinned;
+    if (note.attachments.length > 0) meta.attachments = note.attachments;
+    fs.writeFileSync(filePath, serializeFrontmatter(meta) + note.content, "utf-8");
+    this.mdPathCache.set(note.id, filePath);
+  }
+
+  /**
+   * Find the .md file for a note ID. Checks cache first, then scans.
+   * Returns null if not found.
+   */
+  private findNoteFile(id: string): string | null {
+    if (!this.rootFolder) return null;
+    const cached = this.mdPathCache.get(id);
+    if (cached && fs.existsSync(cached)) return cached;
+
+    // Cache miss — scan to find the file
+    let found: string | null = null;
+    walkDir(this.rootFolder, (filePath) => {
+      if (found || !filePath.endsWith(".md")) return;
+      const rel = path.relative(this.rootFolder!, filePath);
+      // Quick check: path-derived ID matches (no file read needed)
+      if (pathToNoteId(rel) === id) { found = filePath; return; }
+      // Slower: check cortex_id in frontmatter
+      try {
+        const raw = fs.readFileSync(filePath, "utf-8");
+        const { meta } = parseFrontmatter(raw);
+        if (meta.cortex_id === id) found = filePath;
+      } catch { /* skip */ }
+    });
+    if (found) this.mdPathCache.set(id, found);
+    return found;
+  }
+
+  /** Update an existing .md file with new note data, preserving the original filename. */
+  private updateMdNoteFile(id: string, updates: Partial<Note>): Note | undefined {
+    const filePath = this.findNoteFile(id);
+    if (!filePath) return undefined;
+
+    const rel = path.relative(this.rootFolder!, filePath);
+    const current = this.parseMdNote(filePath, rel);
+    const updated: Note = { ...current, ...updates, updatedAt: new Date().toISOString() };
+
+    // Re-read existing frontmatter to preserve Obsidian/third-party fields
+    const raw = fs.readFileSync(filePath, "utf-8");
+    const { meta: existingMeta } = parseFrontmatter(raw);
+    const meta: Record<string, any> = {
+      ...existingMeta,
+      cortex_id: updated.id,
+      updated: updated.updatedAt,
+    };
+    if (updated.tags.length > 0) meta.tags = updated.tags; else delete meta.tags;
+    if (updated.pinned) meta.pinned = true; else delete meta.pinned;
+    if (updated.attachments.length > 0) meta.attachments = updated.attachments; else delete meta.attachments;
+
+    fs.writeFileSync(filePath, serializeFrontmatter(meta) + updated.content, "utf-8");
+    return updated;
+  }
   private noteGroupsPath() { return path.join(this.dataDir, "notes", "groups.json"); }
+
+  // ============ NOTE GROUPS ============
 
   getNoteGroups(vaultName?: string): NoteGroup[] {
     const groups: NoteGroup[] = readJson(this.noteGroupsPath(), []);
@@ -113,12 +351,19 @@ export class FileStorage {
     const target = groups.find(g => g.id === id);
     if (!target || target.isDefault) return false;
     // Reassign all notes in this group to the default group
-    const notes = this.getNotesIndex();
-    let changed = false;
-    for (const note of notes) {
-      if (note.groupId === id) { note.groupId = "default"; changed = true; }
+    if (this.rootFolder) {
+      // External mode: update each affected .md file individually
+      for (const note of this.getNotes()) {
+        if (note.groupId === id) this.updateNote(note.id, { groupId: "default" });
+      }
+    } else {
+      const notes = this.getNotesIndex();
+      let changed = false;
+      for (const note of notes) {
+        if (note.groupId === id) { note.groupId = "default"; changed = true; }
+      }
+      if (changed) this.saveNotesIndex(notes);
     }
-    if (changed) this.saveNotesIndex(notes);
     writeJson(this.noteGroupsPath(), groups.filter(g => g.id !== id));
     return true;
   }
@@ -127,10 +372,12 @@ export class FileStorage {
   private notesIndexPath() { return path.join(this.dataDir, "notes", "index.json"); }
 
   private getNotesIndex(): Note[] {
+    if (this.rootFolder) return this.scanMdFiles();
     return readJson(this.notesIndexPath(), []);
   }
 
   private saveNotesIndex(notes: Note[]) {
+    if (this.rootFolder) return; // External mode: writes happen per-note, not as a bulk index
     writeJson(this.notesIndexPath(), notes);
   }
 
@@ -139,6 +386,12 @@ export class FileStorage {
   }
 
   getNote(id: string): Note | undefined {
+    if (this.rootFolder) {
+      const filePath = this.findNoteFile(id);
+      if (!filePath) return undefined;
+      const rel = path.relative(this.rootFolder, filePath);
+      try { return this.parseMdNote(filePath, rel); } catch { return undefined; }
+    }
     return this.getNotesIndex().find(n => n.id === id);
   }
 
@@ -156,20 +409,25 @@ export class FileStorage {
       createdAt: now,
       updatedAt: now,
     };
+
+    if (this.rootFolder) {
+      this.writeMdNote(note);
+      return note;
+    }
+
     const notes = this.getNotesIndex();
     notes.push(note);
     this.saveNotesIndex(notes);
-
     // Also save markdown file for portability
     const mdDir = path.join(this.dataDir, "notes", "files", note.folder);
     ensureDir(mdDir);
     const safeName = note.title.replace(/[^a-zA-Z0-9-_ ]/g, "").trim() || note.id;
     fs.writeFileSync(path.join(mdDir, `${safeName}.md`), note.content, "utf-8");
-
     return note;
   }
 
   updateNote(id: string, updates: Partial<Note>): Note | undefined {
+    if (this.rootFolder) return this.updateMdNoteFile(id, updates);
     const notes = this.getNotesIndex();
     const idx = notes.findIndex(n => n.id === id);
     if (idx === -1) return undefined;
@@ -179,6 +437,13 @@ export class FileStorage {
   }
 
   deleteNote(id: string): boolean {
+    if (this.rootFolder) {
+      const filePath = this.findNoteFile(id);
+      if (!filePath || !fs.existsSync(filePath)) return false;
+      fs.unlinkSync(filePath);
+      this.mdPathCache.delete(id);
+      return true;
+    }
     const notes = this.getNotesIndex();
     const filtered = notes.filter(n => n.id !== id);
     if (filtered.length === notes.length) return false;
@@ -187,6 +452,11 @@ export class FileStorage {
   }
 
   bulkDeleteNotes(ids: string[]): number {
+    if (this.rootFolder) {
+      let deleted = 0;
+      for (const id of ids) { if (this.deleteNote(id)) deleted++; }
+      return deleted;
+    }
     const idSet = new Set(ids);
     const notes = this.getNotesIndex();
     const filtered = notes.filter(n => !idSet.has(n.id));
@@ -196,7 +466,7 @@ export class FileStorage {
   }
 
   getNoteFolders(): string[] {
-    const notes = this.getNotesIndex();
+    const notes = this.getNotes();
     const folders = new Set(notes.map(n => n.folder));
     folders.add("/");
     return Array.from(folders).sort();
@@ -879,7 +1149,7 @@ export class VaultManager {
     }
 
     const vaultDir = this.resolveVaultDir(vault);
-    const storage = new FileStorage(vaultDir);
+    const storage = new FileStorage(vaultDir, vault.settings?.folderPath);
     this.storageCache.set(vaultId, storage);
     return storage;
   }
