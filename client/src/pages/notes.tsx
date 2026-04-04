@@ -69,6 +69,7 @@ import {
 import { ContextChat, type ContextItem } from "@/components/context-chat";
 import { ResizeHandle, useResizablePanel } from "@/components/resize-handle";
 import { ImageLightbox, useImageLightbox } from "@/components/image-lightbox";
+import { FileTree, type FileNode } from "@/components/file-tree";
 import { marked } from "@/lib/marked-config";
 import { useToast } from "@/hooks/use-toast";
 
@@ -276,6 +277,7 @@ export default function NotesPage() {
   const [newGroupName, setNewGroupName] = useState("");
   const [editingGroupId, setEditingGroupId] = useState<string | null>(null);
   const [editingGroupName, setEditingGroupName] = useState("");
+  const [selectedFilePath, setSelectedFilePath] = useState<string | null>(null);
   const lastCheckedIdxRef = useRef<number>(-1);
   const filteredNotesRef = useRef<Note[]>([]);
 
@@ -287,10 +289,16 @@ export default function NotesPage() {
   const editTextareaRef = useRef<HTMLTextAreaElement>(null);
   const queryClient = useQueryClient();
   const { toast } = useToast();
-  const { vaultParam, vaultId } = useVault();
+  const { vaultParam, vaultId, activeVault } = useVault();
+  const isFileBrowser = !!activeVault?.settings?.folderPath;
   const { lightbox, handleContainerClick, closeLightbox } = useImageLightbox();
 
-  const noteList = useResizablePanel({ defaultWidth: 280, minWidth: 200, maxWidth: 420, storageKey: "cortex-notes-list-width" });
+  const noteList = useResizablePanel({
+    defaultWidth: isFileBrowser ? 320 : 280,
+    minWidth: 200,
+    maxWidth: isFileBrowser ? 600 : 420,
+    storageKey: "cortex-notes-list-width",
+  });
   const chatPanel = useResizablePanel({ defaultWidth: 420, minWidth: 280, maxWidth: 800, storageKey: "cortex-notes-chat-width", reverse: true });
 
   const { data: notes = [] } = useQuery<Note[]>({
@@ -380,6 +388,22 @@ export default function NotesPage() {
     setEditMode(false);
     toast({ title: "Note saved" });
   }, [selectedNote, editTitle, editContent, updateNote, toast]);
+
+  // File tree selection handler — only .md files open in editor; others just select path
+  const handleFileSelect = useCallback(async (node: FileNode) => {
+    setSelectedFilePath(node.path);
+    if (!vaultId || node.ext !== "md") return;
+    try {
+      const note = await apiRequest("GET", `/api/vaults/${vaultId}/note-by-path?path=${encodeURIComponent(node.path)}`).then(r => r.json());
+      if (note?.id) {
+        setSelectedNote(note);
+        setEditTitle(note.title);
+        setEditContent(note.content);
+        setEditMode(false);
+        setViewMode("edit");
+      }
+    } catch { /* not a note yet */ }
+  }, [vaultId]);
 
   // Keyboard shortcut: Cmd/Ctrl+S to save
   useEffect(() => {
@@ -589,10 +613,17 @@ export default function NotesPage() {
       </header>
 
       <div className="flex-1 flex min-h-0">
-        {/* Sidebar: Groups + Note list */}
+        {/* Sidebar: file browser OR groups + note list */}
         <div className="border-r border-border/50 flex flex-col shrink-0" style={{ width: noteList.width }}>
 
-          {/* Group tabs */}
+          {isFileBrowser ? (
+            <FileTree
+              vaultId={vaultId!}
+              selectedPath={selectedFilePath}
+              onFileSelect={handleFileSelect}
+            />
+          ) : (
+            <>
           <div className="flex items-center gap-0.5 px-2 pt-2 pb-1 border-b border-border/30 overflow-x-auto scrollbar-none">
             {groups.map(group => (
               <div key={group.id} className="relative group/tab shrink-0">
@@ -781,6 +812,8 @@ export default function NotesPage() {
                 <Trash2 className="w-3 h-3" /> Delete
               </Button>
             </div>
+          )}
+          </>
           )}
         </div>
 

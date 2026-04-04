@@ -99,6 +99,114 @@ export function registerRoutes(server: Server, app: Express) {
     res.json({ success: true });
   });
 
+  // ============ VAULT FILE BROWSER ============
+  function buildFileTree(absPath: string, rootFolder: string): any[] {
+    const entries = fs.readdirSync(absPath, { withFileTypes: true });
+    const result: any[] = [];
+    for (const entry of entries) {
+      if (entry.name.startsWith(".")) continue; // skip hidden
+      const entryAbs = path.join(absPath, entry.name);
+      const entryRel = path.relative(rootFolder, entryAbs).replace(/\\/g, "/");
+      if (entry.isDirectory()) {
+        result.push({ name: entry.name, path: entryRel, type: "directory", children: buildFileTree(entryAbs, rootFolder) });
+      } else {
+        const ext = path.extname(entry.name).slice(1).toLowerCase();
+        const stat = fs.statSync(entryAbs);
+        result.push({ name: entry.name, path: entryRel, type: "file", ext, size: stat.size });
+      }
+    }
+    return result.sort((a: any, b: any) => {
+      if (a.type !== b.type) return a.type === "directory" ? -1 : 1;
+      return a.name.localeCompare(b.name);
+    });
+  }
+
+  app.get("/api/vaults/:id/files", (req, res) => {
+    const vault = vaultManager.getVault(req.params.id);
+    if (!vault) return res.status(404).json({ error: "Vault not found" });
+    const rootFolder = vault.settings?.folderPath;
+    if (!rootFolder) return res.status(400).json({ error: "Vault has no folder path" });
+    try {
+      res.json(buildFileTree(rootFolder, rootFolder));
+    } catch (err: any) {
+      res.status(500).json({ error: err.message });
+    }
+  });
+
+  app.post("/api/vaults/:id/files", (req, res) => {
+    const vault = vaultManager.getVault(req.params.id);
+    if (!vault) return res.status(404).json({ error: "Vault not found" });
+    const rootFolder = vault.settings?.folderPath;
+    if (!rootFolder) return res.status(400).json({ error: "Vault has no folder path" });
+    const { filePath, type, content = "" } = req.body as { filePath: string; type: "file" | "directory"; content?: string };
+    const absPath = path.join(rootFolder, filePath);
+    if (!absPath.startsWith(rootFolder)) return res.status(403).json({ error: "Forbidden" });
+    try {
+      if (type === "directory") {
+        fs.mkdirSync(absPath, { recursive: true });
+      } else {
+        fs.mkdirSync(path.dirname(absPath), { recursive: true });
+        if (!fs.existsSync(absPath)) fs.writeFileSync(absPath, content, "utf8");
+      }
+      res.json({ ok: true });
+    } catch (err: any) {
+      res.status(500).json({ error: err.message });
+    }
+  });
+
+  app.patch("/api/vaults/:id/files", (req, res) => {
+    const vault = vaultManager.getVault(req.params.id);
+    if (!vault) return res.status(404).json({ error: "Vault not found" });
+    const rootFolder = vault.settings?.folderPath;
+    if (!rootFolder) return res.status(400).json({ error: "Vault has no folder path" });
+    const { filePath, newName } = req.body as { filePath: string; newName: string };
+    const absOld = path.join(rootFolder, filePath);
+    const absNew = path.join(path.dirname(absOld), newName);
+    if (!absOld.startsWith(rootFolder) || !absNew.startsWith(rootFolder)) return res.status(403).json({ error: "Forbidden" });
+    try {
+      fs.renameSync(absOld, absNew);
+      res.json({ ok: true });
+    } catch (err: any) {
+      res.status(500).json({ error: err.message });
+    }
+  });
+
+  app.delete("/api/vaults/:id/files", (req, res) => {
+    const vault = vaultManager.getVault(req.params.id);
+    if (!vault) return res.status(404).json({ error: "Vault not found" });
+    const rootFolder = vault.settings?.folderPath;
+    if (!rootFolder) return res.status(400).json({ error: "Vault has no folder path" });
+    const filePath = req.query.path as string;
+    const absPath = path.join(rootFolder, filePath);
+    if (!absPath.startsWith(rootFolder)) return res.status(403).json({ error: "Forbidden" });
+    try {
+      const stat = fs.statSync(absPath);
+      if (stat.isDirectory()) {
+        fs.rmSync(absPath, { recursive: true, force: true });
+      } else {
+        fs.unlinkSync(absPath);
+      }
+      res.json({ ok: true });
+    } catch (err: any) {
+      res.status(500).json({ error: err.message });
+    }
+  });
+
+  // Lookup note by relative file path (for file browser → editor integration)
+  app.get("/api/vaults/:id/note-by-path", (req, res) => {
+    const vault = vaultManager.getVault(req.params.id);
+    if (!vault) return res.status(404).json({ error: "Vault not found" });
+    const store = vaultManager.getStorage(vault.id);
+    const filePath = req.query.path as string;
+    try {
+      const note = store.getNoteByFilePath(filePath);
+      if (!note) return res.status(404).json({ error: "Note not found" });
+      res.json(note);
+    } catch (err: any) {
+      res.status(500).json({ error: err.message });
+    }
+  });
+
   // ============ NOTES (vault-scoped via ?vault=) ============
   app.get("/api/notes", (req, res) => {
     const store = getVaultStorage(req);

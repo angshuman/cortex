@@ -272,9 +272,25 @@ export class FileStorage {
     return found;
   }
 
+  /** Find a note by its relative file path (used by the file browser). */
+  getNoteByFilePath(relPath: string): Note | null {
+    if (!this.rootFolder) return null;
+    // Normalise separators
+    const normRel = relPath.replace(/\\/g, "/");
+    // Ensure cache is populated
+    if (this.mdPathCache.size === 0) this.scanMdFiles();
+    // Find by cached path
+    for (const [noteId, absPath] of this.mdPathCache) {
+      const rel = path.relative(this.rootFolder, absPath).replace(/\\/g, "/");
+      if (rel === normRel) return this.getNote(noteId);
+    }
+    // Fallback: try the deterministic hash ID derived from the path
+    const id = pathToNoteId(normRel);
+    return this.getNote(id);
+  }
+
   /** Update an existing .md file with new note data, preserving the original filename. */
-  private updateMdNoteFile(id: string, updates: Partial<Note>): Note | undefined {
-    const filePath = this.findNoteFile(id);
+  private updateMdNoteFile(id: string, updates: Partial<Note>): Note | undefined {const filePath = this.findNoteFile(id);
     if (!filePath) return undefined;
 
     const rel = path.relative(this.rootFolder!, filePath);
