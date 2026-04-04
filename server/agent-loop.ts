@@ -33,7 +33,7 @@ export async function runAgentLoop(
   compactContext: (inputTokens: number, provider: string) => Promise<boolean>,
   askUserFn?: AskUserFn,
 ): Promise<void> {
-  if (provider === "claude") {
+  if (provider === "anthropic") {
     await runClaude(systemPrompt, tools, model, messages, storage, agentSettings, emit, compactContext, askUserFn);
   } else {
     await runOpenAI(systemPrompt, tools, model, provider, messages, storage, agentSettings, emit, compactContext, askUserFn);
@@ -100,7 +100,7 @@ async function runClaude(
     if ((response as any).usage) {
       const u = (response as any).usage;
       storage.addTokenUsage(u.input_tokens || 0, u.output_tokens || 0);
-      const compacted = await compactContext(u.input_tokens || 0, "claude");
+      const compacted = await compactContext(u.input_tokens || 0, "anthropic");
       if (compacted) {
         claudeMessages.length = 0;
         claudeMessages.push(...messagesToClaude(messages, storage));

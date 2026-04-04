@@ -15,7 +15,9 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import {
   Select,
   SelectContent,
+  SelectGroup,
   SelectItem,
+  SelectLabel,
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
@@ -106,6 +108,49 @@ const CATEGORY_DESCRIPTIONS: Record<string, string> = {
 };
 const PRIORITY_LABELS = ["Always", "High", "Medium", "Low"];
 const PRIORITY_COLORS = ["bg-green-500", "bg-blue-500", "bg-yellow-500", "bg-gray-400"];
+
+// Available models per provider
+const PROVIDER_MODELS: Record<string, { label: string; models: { value: string; label: string }[] }> = {
+  anthropic: {
+    label: "Anthropic",
+    models: [
+      { value: "claude-opus-4-5", label: "Claude Opus 4.5 (latest)" },
+      { value: "claude-sonnet-4-5", label: "Claude Sonnet 4.5" },
+      { value: "claude-haiku-4-5", label: "Claude Haiku 4.5 (fast)" },
+      { value: "claude-opus-4", label: "Claude Opus 4" },
+      { value: "claude-sonnet-4", label: "Claude Sonnet 4" },
+      { value: "claude-3-7-sonnet-20250219", label: "Claude 3.7 Sonnet" },
+    ],
+  },
+  openai: {
+    label: "OpenAI",
+    models: [
+      { value: "gpt-4.1", label: "GPT-4.1 (latest)" },
+      { value: "gpt-4o", label: "GPT-4o" },
+      { value: "gpt-4o-mini", label: "GPT-4o Mini (fast)" },
+      { value: "gpt-4-turbo", label: "GPT-4 Turbo" },
+      { value: "o3", label: "o3 (reasoning)" },
+      { value: "o4-mini", label: "o4-mini (reasoning, fast)" },
+    ],
+  },
+  grok: {
+    label: "Grok (xAI)",
+    models: [
+      { value: "grok-3", label: "Grok 3 (latest)" },
+      { value: "grok-3-mini", label: "Grok 3 Mini (fast)" },
+      { value: "grok-2", label: "Grok 2" },
+    ],
+  },
+  google: {
+    label: "Google",
+    models: [
+      { value: "gemini-2.5-pro", label: "Gemini 2.5 Pro (latest)" },
+      { value: "gemini-2.5-flash", label: "Gemini 2.5 Flash (fast)" },
+      { value: "gemini-2.0-flash", label: "Gemini 2.0 Flash" },
+      { value: "gemini-1.5-pro", label: "Gemini 1.5 Pro" },
+    ],
+  },
+};
 
 export default function SettingsPage() {
   const { toast } = useToast();
@@ -226,15 +271,30 @@ export default function SettingsPage() {
                 </p>
                 <ApiKeySetupDialog open={false} onOpenChange={() => {}} mode="inline" />
                 <div className="mt-3">
-                  <Label className="text-xs text-muted-foreground">Model Override</Label>
-                  <Input
-                    className="mt-1 text-sm h-8"
-                    placeholder="Auto-detect"
-                    defaultValue={config?.aiModel || ""}
-                    onBlur={(e) => updateConfig.mutate({ aiModel: e.target.value || undefined })}
-                  />
+                  <Label className="text-xs text-muted-foreground">Model</Label>
+                  <Select
+                    value={config?.aiModel || "__default__"}
+                    onValueChange={(v) => updateConfig.mutate({ aiModel: v === "__default__" ? undefined : v })}
+                  >
+                    <SelectTrigger className="mt-1 text-sm h-8">
+                      <SelectValue placeholder="Auto-detect (default)" />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="__default__">Auto-detect (default)</SelectItem>
+                      {Object.entries(PROVIDER_MODELS).map(([providerKey, group]) => (
+                        <SelectGroup key={providerKey}>
+                          <SelectLabel className="text-[10px]">{group.label}</SelectLabel>
+                          {group.models.map((m) => (
+                            <SelectItem key={m.value} value={m.value} className="text-xs">
+                              {m.label}
+                            </SelectItem>
+                          ))}
+                        </SelectGroup>
+                      ))}
+                    </SelectContent>
+                  </Select>
                   <p className="text-[10px] text-muted-foreground mt-1">
-                    Override the default model (e.g. gpt-4o, claude-sonnet-4-20250514, gemini-2.0-flash).
+                    Override the model used by the AI agent. Leave as Auto-detect to use the provider default.
                   </p>
                 </div>
               </Card>
@@ -426,7 +486,7 @@ export default function SettingsPage() {
                   </div>
                   <div>
                     <h3 className="text-sm font-semibold">Cortex</h3>
-                    <p className="text-[11px] text-muted-foreground">Personal AI Operating System</p>
+                    <p className="text-[11px] text-muted-foreground">Your local-first AI workspace</p>
                   </div>
                 </div>
                 <div className="space-y-2 text-xs text-muted-foreground">

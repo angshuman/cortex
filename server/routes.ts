@@ -8,8 +8,21 @@ import { log, logError } from "./index";
 import type { AskUserFn } from "./agent-types";
 import multer from "multer";
 import path from "path";
+import fs from "fs";
 
 const upload = multer({ storage: multer.memoryStorage(), limits: { fileSize: 10 * 1024 * 1024 } });
+
+// Read version from package.json once at startup
+function readPackageVersion(): string {
+  try {
+    const pkgPath = path.join(__dirname, "..", "package.json");
+    const pkg = JSON.parse(fs.readFileSync(pkgPath, "utf8"));
+    return pkg.version || "1.0.0";
+  } catch {
+    return "1.0.0";
+  }
+}
+const APP_VERSION = readPackageVersion();
 
 const activeAgents = new Map<string, { agent: Agent | null; ws: Set<WebSocket> }>();
 
@@ -566,7 +579,7 @@ export function registerRoutes(server: Server, app: Express) {
     }
     // Auto-detect provider from first key that's set
     let aiProvider = config.aiProvider;
-    if (newKeys.anthropic) aiProvider = "claude";
+    if (newKeys.anthropic) aiProvider = "anthropic";
     else if (newKeys.openai) aiProvider = "openai";
     else if (newKeys.grok) aiProvider = "grok";
     else if (newKeys.google) aiProvider = "google";
@@ -672,7 +685,7 @@ export function registerRoutes(server: Server, app: Express) {
       provider: hasAnyKey ? provider : "none",
       hasApiKey: hasAnyKey,
       keyStatus,
-      version: "2.0.0",
+      version: APP_VERSION,
     });
   });
 

@@ -193,7 +193,7 @@ export type ApiKeys = z.infer<typeof apiKeysSchema>;
 
 export const configSchema = z.object({
   dataDir: z.string().default("~/.cortex"),
-  aiProvider: z.enum(["claude", "openai", "grok", "google"]).default("claude"),
+  aiProvider: z.enum(["anthropic", "openai", "grok", "google"]).default("anthropic"),
   aiModel: z.string().optional(),
   apiKeys: apiKeysSchema.default({}),
   vectorSearch: z.enum(["local", "openai"]).default("local"),

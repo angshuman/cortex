@@ -18,16 +18,17 @@ import { Zap, Cpu, AlertTriangle, RotateCcw, Layers } from "lucide-react";
 
 const PROVIDER_NAMES: Record<string, string> = {
   openai: "OpenAI",
-  anthropic: "Claude",
+  anthropic: "Anthropic",
   grok: "Grok",
   google: "Gemini",
   none: "No Provider",
 };
 
-const PROVIDER_MODELS: Record<string, string> = {
+// Default model per provider (shown when no explicit override is set)
+const PROVIDER_DEFAULT_MODELS: Record<string, string> = {
   openai: "gpt-4.1",
   anthropic: "claude-opus-4-5",
-  grok: "grok-4",
+  grok: "grok-3",
   google: "gemini-2.5-flash",
 };
 
@@ -85,6 +86,7 @@ export function StatusBar() {
     provider: string;
     hasApiKey: boolean;
     keyStatus: Record<string, { set: boolean; source: string }>;
+    version: string;
   }>({
     queryKey: ["/api/info"],
     queryFn: () => apiRequest("GET", "/api/info").then((r) => r.json()),
@@ -140,9 +142,12 @@ export function StatusBar() {
     }
     updateConfig.mutate({
       aiProvider: newProvider,
-      aiModel: PROVIDER_MODELS[newProvider] || undefined,
+      aiModel: undefined, // clear model override so default kicks in
     });
   };
+
+  // Effective model: explicit override, or the provider's default
+  const effectiveModel = config?.aiModel || PROVIDER_DEFAULT_MODELS[provider] || "";
 
   return (
     <div className="h-6 border-t border-border/50 bg-background/80 backdrop-blur-sm flex items-center px-3 text-[10px] text-muted-foreground gap-0 shrink-0 select-none">
@@ -217,18 +222,20 @@ export function StatusBar() {
         </div>
       )}
 
-      {/* Model indicator */}
-      {config?.aiModel && (
+      {/* Model indicator — always show effective model */}
+      {effectiveModel && provider !== "none" && (
         <>
           <div className="w-px h-3 bg-border/50 mx-1" />
           <Tooltip>
             <TooltipTrigger asChild>
-              <span className="px-1.5 font-mono truncate max-w-[120px]">
-                {config.aiModel}
+              <span className="px-1.5 font-mono truncate max-w-[140px]">
+                {effectiveModel}
               </span>
             </TooltipTrigger>
             <TooltipContent side="top" className="text-xs">
-              Model override: {config.aiModel}
+              {config?.aiModel
+                ? `Model override: ${config.aiModel}`
+                : `Default model for ${PROVIDER_NAMES[provider] || provider}`}
             </TooltipContent>
           </Tooltip>
         </>
@@ -272,7 +279,7 @@ export function StatusBar() {
       <div className="flex-1" />
 
       {/* Version */}
-      <span className="px-1 opacity-50">v2.0</span>
+      <span className="px-1 opacity-50">v{info?.version || "1.0.0"}</span>
     </div>
   );
 }

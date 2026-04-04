@@ -315,7 +315,7 @@ Output ONLY valid JSON: { "intent": "..." }`,
 
   private async compactContext(inputTokens: number, provider: string): Promise<boolean> {
     const CONTEXT_WINDOW: Record<string, number> = {
-      claude: 200_000, openai: 128_000, grok: 131_072, google: 1_000_000,
+      anthropic: 200_000, openai: 128_000, grok: 131_072, google: 1_000_000,
     };
     const usageRatio = inputTokens / (CONTEXT_WINDOW[provider] ?? 128_000);
 

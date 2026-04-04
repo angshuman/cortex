@@ -15,7 +15,7 @@ export function detectProvider(): { provider: string; model: string } {
       const ok = vaultManager.resolveApiKey("openai");
       const gk = vaultManager.resolveApiKey("grok");
       const goog = vaultManager.resolveApiKey("google");
-      if (ak && ak.length > 10) return { provider: "claude", model: "claude-opus-4-5" };
+      if (ak && ak.length > 10) return { provider: "anthropic", model: "claude-opus-4-5" };
       if (ok && ok.length > 10) return { provider: "openai", model: "gpt-4.1" };
       if (gk && gk.length > 10) return { provider: "grok", model: "grok-4" };
       if (goog && goog.length > 10) return { provider: "google", model: "gemini-2.5-flash" };
@@ -25,7 +25,7 @@ export function detectProvider(): { provider: string; model: string } {
   const ok = process.env.OPENAI_API_KEY;
   const gk = process.env.GROK_API_KEY;
   const goog = process.env.GOOGLE_API_KEY;
-  if (ak && ak.length > 10) return { provider: "claude", model: "claude-opus-4-5" };
+  if (ak && ak.length > 10) return { provider: "anthropic", model: "claude-opus-4-5" };
   if (ok && ok.length > 10) return { provider: "openai", model: "gpt-4.1" };
   if (gk && gk.length > 10) return { provider: "grok", model: "grok-4" };
   if (goog && goog.length > 10) return { provider: "google", model: "gemini-2.5-flash" };
@@ -57,7 +57,7 @@ export async function callLLMJson(systemPrompt: string, userPrompt: string, maxT
   if (provider === "none") return null;
   try {
     let text = "";
-    if (provider === "claude") {
+    if (provider === "anthropic") {
       const client = new Anthropic({ apiKey: resolveKey("anthropic") });
       const resp = await client.messages.create({
         model, max_tokens: maxTokens, temperature: 0.3,

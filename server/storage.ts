@@ -1209,11 +1209,11 @@ export class VaultManager {
 
   /** Detect provider from env vars only (used during initial config creation). */
   private detectProviderFromEnv(): string {
-    if (process.env.ANTHROPIC_API_KEY && process.env.ANTHROPIC_API_KEY.startsWith("sk-ant")) return "claude";
+    if (process.env.ANTHROPIC_API_KEY && process.env.ANTHROPIC_API_KEY.startsWith("sk-ant")) return "anthropic";
     if (process.env.OPENAI_API_KEY && process.env.OPENAI_API_KEY.startsWith("sk-")) return "openai";
     if (process.env.GROK_API_KEY) return "grok";
     if (process.env.GOOGLE_API_KEY) return "google";
-    return "claude";
+    return "anthropic";
   }
 
   /** Detect best provider from all sources (config keys + env vars). */
@@ -1221,8 +1221,12 @@ export class VaultManager {
     const configPath = path.join(this.rootDir, "config.json");
     if (fs.existsSync(configPath)) {
       const config = readJson(configPath, {} as any);
+      // Respect explicit provider preference when it has a valid key
+      const explicit = config.aiProvider as string | undefined;
+      if (explicit && explicit !== "none") return explicit;
+      // Fall back to first key found
       const keys = config.apiKeys || {};
-      if (keys.anthropic) return "claude";
+      if (keys.anthropic) return "anthropic";
       if (keys.openai) return "openai";
       if (keys.grok) return "grok";
       if (keys.google) return "google";
