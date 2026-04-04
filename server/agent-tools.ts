@@ -2,6 +2,153 @@ import { FileStorage } from "./storage";
 import { mcpManager } from "./mcp-client";
 import type { AgentSettings, Skill } from "@shared/schema";
 import { defaultAgentSettings, type ToolDef } from "./agent-types";
+import path from "path";
+import fs from "fs";
+
+// ── Document tools (loaded lazily so missing libs don't break startup) ────────
+async function readDocumentFile(filePath: string): Promise<string> {
+  const ext = path.extname(filePath).toLowerCase();
+  const absPath = path.resolve(filePath);
+  if (!fs.existsSync(absPath)) throw new Error(`File not found: ${filePath}`);
+
+  if (ext === ".pdf") {
+    const pdfParse = (await import("pdf-parse")).default;
+    const buffer = fs.readFileSync(absPath);
+    const data = await pdfParse(buffer);
+    return data.text;
+  }
+  if (ext === ".docx" || ext === ".doc") {
+    const mammoth = await import("mammoth");
+    const result = await mammoth.extractRawText({ path: absPath });
+    return result.value;
+  }
+  if (ext === ".txt" || ext === ".md") {
+    return fs.readFileSync(absPath, "utf-8");
+  }
+  throw new Error(`Unsupported document format: ${ext}`);
+}
+
+async function readSpreadsheetFile(filePath: string, sheetName?: string): Promise<string> {
+  const ext = path.extname(filePath).toLowerCase();
+  const absPath = path.resolve(filePath);
+  if (!fs.existsSync(absPath)) throw new Error(`File not found: ${filePath}`);
+
+  if ([".xlsx", ".xls", ".csv", ".ods"].includes(ext)) {
+    const XLSX = await import("xlsx");
+    const wb = XLSX.readFile(absPath);
+    const sheet = sheetName
+      ? wb.Sheets[sheetName]
+      : wb.Sheets[wb.SheetNames[0]];
+    if (!sheet) throw new Error(`Sheet not found: ${sheetName}`);
+    const rows: any[][] = XLSX.utils.sheet_to_json(sheet, { header: 1 });
+    return JSON.stringify(rows);
+  }
+  throw new Error(`Unsupported spreadsheet format: ${ext}`);
+}
+
+async function writeDocumentFile(filePath: string, content: string): Promise<void> {
+  const ext = path.extname(filePath).toLowerCase();
+  const absPath = path.resolve(filePath);
+  fs.mkdirSync(path.dirname(absPath), { recursive: true });
+
+  if (ext === ".docx") {
+    const { Document, Paragraph, TextRun, Packer } = await import("docx");
+    const paragraphs = content.split("\n").map(line =>
+      new Paragraph({ children: [new TextRun(line)] })
+    );
+    const doc = new Document({ sections: [{ children: paragraphs }] });
+    const buf = await Packer.toBuffer(doc);
+    fs.writeFileSync(absPath, buf);
+    return;
+  }
+  if (ext === ".txt" || ext === ".md") {
+    fs.writeFileSync(absPath, content, "utf-8");
+    return;
+  }
+  throw new Error(`Unsupported write format: ${ext}`);
+}
+
+async function writeSpreadsheetFile(filePath: string, rowsJson: string, sheetName = "Sheet1"): Promise<void> {
+  const absPath = path.resolve(filePath);
+  fs.mkdirSync(path.dirname(absPath), { recursive: true });
+  const XLSX = await import("xlsx");
+  const rows = JSON.parse(rowsJson);
+  const ws = XLSX.utils.aoa_to_sheet(rows);
+  const wb = XLSX.utils.book_new();
+  XLSX.utils.book_append_sheet(wb, ws, sheetName);
+  XLSX.writeFile(wb, absPath);
+}
+
+async function listSpreadsheetSheets(filePath: string): Promise<string> {
+  const absPath = path.resolve(filePath);
+  if (!fs.existsSync(absPath)) throw new Error(`File not found: ${filePath}`);
+  const XLSX = await import("xlsx");
+  const wb = XLSX.readFile(absPath);
+  return JSON.stringify(wb.SheetNames);
+}
+
+// ── Document tool definitions ─────────────────────────────────────────────────
+const DOCUMENT_TOOL_DEFS: ToolDef[] = [
+  {
+    name: "read_document",
+    description: "Read the text content of a Word (.docx), PDF (.pdf), or plain text (.txt, .md) file. Returns the extracted text.",
+    parameters: {
+      type: "object" as const,
+      properties: {
+        path: { type: "string", description: "Absolute or relative file path to the document." },
+      },
+      required: ["path"],
+    },
+  },
+  {
+    name: "read_spreadsheet",
+    description: "Read rows from an Excel (.xlsx, .xls) or CSV file. Returns a JSON array of rows. Optionally specify a sheet name.",
+    parameters: {
+      type: "object" as const,
+      properties: {
+        path: { type: "string", description: "Absolute or relative file path to the spreadsheet." },
+        sheet: { type: "string", description: "Optional sheet name. Defaults to the first sheet." },
+      },
+      required: ["path"],
+    },
+  },
+  {
+    name: "list_spreadsheet_sheets",
+    description: "List all sheet names in an Excel workbook.",
+    parameters: {
+      type: "object" as const,
+      properties: {
+        path: { type: "string", description: "Absolute or relative path to the .xlsx file." },
+      },
+      required: ["path"],
+    },
+  },
+  {
+    name: "write_document",
+    description: "Write text content to a file. Supports .docx (creates a Word document) and .txt/.md (plain text). Creates parent directories if needed.",
+    parameters: {
+      type: "object" as const,
+      properties: {
+        path: { type: "string", description: "Absolute or relative output file path." },
+        content: { type: "string", description: "Text content to write. For .docx, each newline becomes a new paragraph." },
+      },
+      required: ["path", "content"],
+    },
+  },
+  {
+    name: "write_spreadsheet",
+    description: "Write rows to an Excel (.xlsx) file. rows_json should be a JSON array of arrays (rows of cells). Creates a new file or overwrites.",
+    parameters: {
+      type: "object" as const,
+      properties: {
+        path: { type: "string", description: "Absolute or relative output .xlsx file path." },
+        rows_json: { type: "string", description: "JSON array of arrays representing rows and cells, e.g. [[\"Name\",\"Score\"],[\"Alice\",95]]" },
+        sheet_name: { type: "string", description: "Optional sheet name. Defaults to 'Sheet1'." },
+      },
+      required: ["path", "rows_json"],
+    },
+  },
+];
 
 export function getToolDefinitions(storage: FileStorage): ToolDef[] {
   const skills = storage.getSkills().filter((s: Skill) => s.enabled);
@@ -72,6 +219,9 @@ export function getToolDefinitions(storage: FileStorage): ToolDef[] {
       skillToolNames.add(mcpTool.name); // prevent duplicates across servers
     }
   });
+
+  // Document tools — always available
+  tools.push(...DOCUMENT_TOOL_DEFS);
 
   return tools;
 }
@@ -273,6 +423,29 @@ export async function executeTool(
         } catch (err: any) {
           return JSON.stringify({ error: `Browser tool error: ${err.message}` });
         }
+      }
+
+      case "read_document": {
+        const text = await readDocumentFile(args.path as string);
+        return text.length > 20000 ? text.slice(0, 20000) + "\n\n[...truncated]" : text;
+      }
+
+      case "read_spreadsheet": {
+        return await readSpreadsheetFile(args.path as string, args.sheet as string | undefined);
+      }
+
+      case "list_spreadsheet_sheets": {
+        return await listSpreadsheetSheets(args.path as string);
+      }
+
+      case "write_document": {
+        await writeDocumentFile(args.path as string, args.content as string);
+        return JSON.stringify({ ok: true, path: args.path });
+      }
+
+      case "write_spreadsheet": {
+        await writeSpreadsheetFile(args.path as string, args.rows_json as string, args.sheet_name as string | undefined);
+        return JSON.stringify({ ok: true, path: args.path });
       }
 
       case "list_files": {
