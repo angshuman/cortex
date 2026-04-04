@@ -72,6 +72,7 @@ export default function ChatPage() {
   const [attachedFiles, setAttachedFiles] = useState<Array<{ id: string; name: string; mimeType: string }>>([]); 
   const [pendingQuestion, setPendingQuestion] = useState<{ id: string; question: string; choices?: string[] } | null>(null);
   const [questionAnswer, setQuestionAnswer] = useState("");
+  const [streamingText, setStreamingText] = useState<string>("");
 
   // Skills
   const { data: skills = [] } = useQuery<Skill[]>({
@@ -130,6 +131,7 @@ export default function ChatPage() {
         if (data.content === "done") {
           setPendingQuestion(null);
           setQuestionAnswer("");
+          setStreamingText("");
           queryClient.invalidateQueries({ queryKey: ["/api/chat/sessions"] });
           queryClient.invalidateQueries({ queryKey: ["/api/notes"] });
           queryClient.invalidateQueries({ queryKey: ["/api/notes/folders"] });
@@ -137,6 +139,10 @@ export default function ChatPage() {
           // Allow session refetch to sync final state
           hasLiveEventsRef.current = false;
         }
+      } else if (data.type === "delta") {
+        // Streaming text chunk — append to streaming bubble
+        hasLiveEventsRef.current = true;
+        setStreamingText(prev => prev + data.content);
       } else if (data.type === "question") {
         hasLiveEventsRef.current = true;
         setEvents(prev => [...prev, data]);
@@ -144,6 +150,11 @@ export default function ChatPage() {
         setQuestionAnswer("");
       } else {
         hasLiveEventsRef.current = true;
+        // When a confirmed event arrives, clear the streaming bubble — the event
+        // now contains the canonical text and will be rendered in the events list.
+        if (data.type === "thought" || data.type === "message" || data.type === "tool_call") {
+          setStreamingText("");
+        }
         setEvents(prev => [...prev, data]);
       }
     };
@@ -178,7 +189,7 @@ export default function ChatPage() {
     if (scrollRef.current) {
       scrollRef.current.scrollTop = scrollRef.current.scrollHeight;
     }
-  }, [events]);
+  }, [events, streamingText]);
 
   const handleSend = useCallback(async () => {
     const msg = input.trim();
@@ -261,6 +272,7 @@ export default function ChatPage() {
   // Dynamic status text derived from the most recent event
   const currentActivity = useMemo(() => {
     if (status !== "thinking") return null;
+    if (streamingText) return "Responding...";
     for (let i = events.length - 1; i >= 0; i--) {
       const e = events[i];
       if (e.type === "tool_call") {
@@ -275,7 +287,7 @@ export default function ChatPage() {
       }
     }
     return "Thinking...";
-  }, [events, status]);
+  }, [events, status, streamingText]);
 
   const handleNewChat = async () => {
     try {
@@ -553,7 +565,24 @@ export default function ChatPage() {
             </div>
           )}
           {events.map((e, i) => renderEvent(e, i))}
-          {status === "thinking" && !pendingQuestion && (
+
+          {/* Streaming bubble — live text as it arrives from the model */}
+          {streamingText && (
+            <div className="flex mb-4 gap-3">
+              <div className="flex-shrink-0 w-7 h-7 rounded-full bg-muted/60 flex items-center justify-center mt-0.5">
+                <Sparkles className="w-3.5 h-3.5 text-muted-foreground" />
+              </div>
+              <div className="flex-1 min-w-0">
+                <div
+                  className="text-sm prose prose-sm dark:prose-invert max-w-none [&_p]:mb-2 [&_ul]:mb-2 [&_ol]:mb-2 [&_pre]:bg-muted [&_pre]:p-3 [&_pre]:rounded-lg [&_code]:text-xs"
+                  dangerouslySetInnerHTML={{ __html: marked.parse(streamingText) as string }}
+                />
+                <span className="inline-block w-2 h-4 bg-muted-foreground/50 animate-pulse rounded-sm ml-0.5 align-middle" />
+              </div>
+            </div>
+          )}
+
+          {status === "thinking" && !pendingQuestion && !streamingText && (
             <div className="flex items-center gap-2.5 mb-3 mt-1">
               <div className="flex-shrink-0 w-7 flex justify-center">
                 <Loader2 className="w-3.5 h-3.5 text-muted-foreground/60 animate-spin" />

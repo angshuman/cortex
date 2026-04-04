@@ -92,10 +92,16 @@ async function runClaude(
       params.temperature = agentSettings.temperature;
     }
 
-    // ── Think ──────────────────────────────────────────────────────────────
-    log(`[agent] claude step=${step} calling LLM`);
-    const response = await client.messages.create(params as any);
-    log(`[agent] claude step=${step} got response stop_reason=${response.stop_reason}`);
+    // ── Think (streaming) ──────────────────────────────────────────────────
+    log(`[agent] claude step=${step} calling LLM (stream)`);
+    const stream = client.messages.stream(params as any);
+
+    // Forward text deltas to the client in real-time
+    stream.on("text", (chunk) => emit("delta", chunk));
+
+    // Await the complete response (stream.finalMessage() resolves after all chunks)
+    const response = await stream.finalMessage();
+    log(`[agent] claude step=${step} stream done stop_reason=${response.stop_reason}`);
 
     if ((response as any).usage) {
       const u = (response as any).usage;
@@ -223,27 +229,64 @@ async function runOpenAI(
   let loopCompleted = false;
   while (step < agentSettings.maxTurns) {
     step++;
-    emit("thought", step === 1 ? "Thinking..." : `Working... (step ${step})`);
 
-    // ── Think ──────────────────────────────────────────────────────────────
-    log(`[agent] openai step=${step} calling LLM`);
-    const response = await client.chat.completions.create({
+    // ── Think (streaming) ──────────────────────────────────────────────────
+    log(`[agent] openai step=${step} calling LLM (stream)`);
+
+    const streamParams: any = {
       model,
       messages: openaiMessages,
       tools: openaiTools.length > 0 ? openaiTools : undefined,
       max_tokens: agentSettings.maxTokens,
       ...(agentSettings.temperature !== undefined ? { temperature: agentSettings.temperature } : {}),
-    } as any);
+      stream: true,
+      stream_options: { include_usage: true },
+    };
 
-    const finishReason = response.choices[0]?.finish_reason;
-    log(`[agent] openai step=${step} got response finish_reason=${finishReason}`);
+    const stream = await client.chat.completions.create(streamParams);
 
-    if (response.usage) {
-      storage.addTokenUsage(response.usage.prompt_tokens || 0, response.usage.completion_tokens || 0);
-      await compactContext(response.usage.prompt_tokens || 0, provider);
+    let fullText = "";
+    let finishReason = "";
+    const toolCallAccum: Record<number, any> = {};
+    let streamUsage: any = null;
+
+    for await (const chunk of stream as any) {
+      const delta = chunk.choices?.[0]?.delta;
+      const fr = chunk.choices?.[0]?.finish_reason;
+      if (fr) finishReason = fr;
+      if (chunk.usage) streamUsage = chunk.usage;
+      if (!delta) continue;
+
+      if (delta.content) {
+        fullText += delta.content;
+        emit("delta", delta.content);
+      }
+      if (delta.tool_calls) {
+        for (const tc of delta.tool_calls) {
+          const idx: number = tc.index ?? 0;
+          if (!toolCallAccum[idx]) {
+            toolCallAccum[idx] = { id: "", type: "function", function: { name: "", arguments: "" } };
+          }
+          if (tc.id) toolCallAccum[idx].id = tc.id;
+          if (tc.function?.name) toolCallAccum[idx].function.name += tc.function.name;
+          if (tc.function?.arguments) toolCallAccum[idx].function.arguments += tc.function.arguments;
+        }
+      }
     }
 
-    const msg: any = response.choices[0].message;
+    log(`[agent] openai step=${step} stream done finish_reason=${finishReason}`);
+
+    if (streamUsage) {
+      storage.addTokenUsage(streamUsage.prompt_tokens || 0, streamUsage.completion_tokens || 0);
+      await compactContext(streamUsage.prompt_tokens || 0, provider);
+    }
+
+    const toolCallsList = Object.values(toolCallAccum);
+    // Synthetic message object matching the non-streaming shape
+    const msg: any = {
+      content: fullText || null,
+      tool_calls: toolCallsList.length > 0 ? toolCallsList : undefined,
+    };
 
     // ── Act + Observe ──────────────────────────────────────────────────────
     if (msg.tool_calls?.length > 0) {
