@@ -317,6 +317,13 @@ class McpClientManager {
   }
 
   /**
+   * Check if a server is currently connecting (in-progress).
+   */
+  isConnecting(serverName: string): boolean {
+    return this.connecting.has(serverName);
+  }
+
+  /**
    * Disconnect a specific server.
    */
   async disconnect(serverName: string): Promise<void> {
@@ -445,19 +452,35 @@ class McpClientManager {
    * Get connection status summary for the UI.
    * Includes both connected servers and configured-but-not-connected servers.
    */
-  getStatus(config?: Config): Record<string, { connected: boolean; tools: string[]; label: string; description: string; setupNotes?: string }> {
-    const status: Record<string, { connected: boolean; tools: string[]; label: string; description: string; setupNotes?: string }> = {};
+  getStatus(config?: Config): Record<string, { connected: boolean; connecting: boolean; tools: string[]; label: string; description: string; setupNotes?: string }> {
+    const status: Record<string, { connected: boolean; connecting: boolean; tools: string[]; label: string; description: string; setupNotes?: string }> = {};
 
     // Add connected servers
     Array.from(this.connections.entries()).forEach(([name, conn]) => {
       const preset = MCP_PRESETS[name];
       status[name] = {
         connected: true,
+        connecting: false,
         tools: conn.tools.map((t: McpTool) => t.name),
         label: preset?.label || name,
         description: preset?.description || `MCP server: ${name}`,
         setupNotes: preset?.setupNotes,
       };
+    });
+
+    // Add currently-connecting servers
+    Array.from(this.connecting.keys()).forEach((name) => {
+      if (!status[name]) {
+        const preset = MCP_PRESETS[name];
+        status[name] = {
+          connected: false,
+          connecting: true,
+          tools: [],
+          label: preset?.label || name,
+          description: preset?.description || `MCP server: ${name}`,
+          setupNotes: preset?.setupNotes,
+        };
+      }
     });
 
     // Add configured but not yet connected servers
@@ -467,6 +490,7 @@ class McpClientManager {
           const preset = MCP_PRESETS[name];
           status[name] = {
             connected: false,
+            connecting: false,
             tools: [],
             label: preset?.label || name,
             description: preset?.description || `MCP server: ${name}`,
@@ -481,6 +505,7 @@ class McpClientManager {
       const preset = MCP_PRESETS["playwright"];
       status["playwright"] = {
         connected: false,
+        connecting: this.connecting.has("playwright"),
         tools: [],
         label: preset.label,
         description: preset.description,

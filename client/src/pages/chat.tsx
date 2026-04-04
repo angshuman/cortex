@@ -601,47 +601,6 @@ export default function ChatPage() {
         onDragLeave={() => setIsDragging(false)}
       >
         <div className="max-w-3xl mx-auto">
-          {/* Attached file badges */}
-          {attachedFiles.length > 0 && (
-            <div className="flex flex-wrap gap-1.5 mb-2">
-              {attachedFiles.map(f => (
-                <div key={f.id} className="flex items-center gap-1.5 bg-muted/50 border border-border/40 rounded-lg px-2.5 py-1 text-xs text-muted-foreground group">
-                  <Paperclip className="w-3 h-3 shrink-0" />
-                  <span className="truncate max-w-[150px]">{f.name}</span>
-                  <button onClick={() => setAttachedFiles(prev => prev.filter(x => x.id !== f.id))} className="opacity-0 group-hover:opacity-100 transition-opacity">
-                    <X className="w-3 h-3" />
-                  </button>
-                </div>
-              ))}
-            </div>
-          )}
-
-          {/* Image previews */}
-          {pendingImages.length > 0 && (
-            <div className="flex flex-wrap gap-2 mb-2">
-              {pendingImages.map(img => (
-                <div key={img.id} className="relative group">
-                  <img
-                    src={img.preview}
-                    alt="preview"
-                    className={`h-16 w-16 rounded-lg object-cover border border-border/50 ${img.uploading ? "opacity-50" : ""} ${img.error ? "border-destructive" : ""}`}
-                  />
-                  {img.uploading && (
-                    <div className="absolute inset-0 flex items-center justify-center">
-                      <Loader2 className="w-4 h-4 animate-spin text-muted-foreground" />
-                    </div>
-                  )}
-                  <button
-                    onClick={() => removeImage(img.id)}
-                    className="absolute -top-1.5 -right-1.5 w-4 h-4 bg-destructive text-destructive-foreground rounded-full flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity"
-                    data-testid={`button-remove-image-${img.id}`}
-                  >
-                    <X className="w-2.5 h-2.5" />
-                  </button>
-                </div>
-              ))}
-            </div>
-          )}
           {/* Skills picker panel */}
           {showSkillsPicker && (
             <div ref={skillsPickerRef} className="mb-2 bg-background border border-border/50 rounded-xl p-3 shadow-lg">
@@ -735,6 +694,41 @@ export default function ChatPage() {
               rows={1}
               data-testid="input-chat"
             />
+            {/* Attached files + images — between textarea and action bar */}
+            {(attachedFiles.length > 0 || pendingImages.length > 0) && (
+              <div className="flex flex-wrap items-end gap-1.5 px-3 pt-1">
+                {attachedFiles.map(f => (
+                  <div key={f.id} className="flex items-center gap-1.5 bg-muted/60 border border-border/40 rounded-lg px-2.5 py-1 text-xs text-muted-foreground group">
+                    <Paperclip className="w-3 h-3 shrink-0" />
+                    <span className="truncate max-w-[150px]">{f.name}</span>
+                    <button onClick={() => setAttachedFiles(prev => prev.filter(x => x.id !== f.id))} className="opacity-0 group-hover:opacity-100 transition-opacity ml-0.5">
+                      <X className="w-3 h-3" />
+                    </button>
+                  </div>
+                ))}
+                {pendingImages.map(img => (
+                  <div key={img.id} className="relative group shrink-0">
+                    <img
+                      src={img.preview}
+                      alt="preview"
+                      className={`h-12 w-12 rounded-lg object-cover border border-border/50 ${img.uploading ? "opacity-50" : ""} ${img.error ? "border-destructive" : ""}`}
+                    />
+                    {img.uploading && (
+                      <div className="absolute inset-0 flex items-center justify-center">
+                        <Loader2 className="w-3 h-3 animate-spin text-muted-foreground" />
+                      </div>
+                    )}
+                    <button
+                      onClick={() => removeImage(img.id)}
+                      className="absolute -top-1 -right-1 w-3.5 h-3.5 bg-destructive text-destructive-foreground rounded-full flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity"
+                      data-testid={`button-remove-image-${img.id}`}
+                    >
+                      <X className="w-2 h-2" />
+                    </button>
+                  </div>
+                ))}
+              </div>
+            )}
             <div className="flex items-center justify-between px-3 py-2">
               <div className="flex items-center gap-1">
                 <AttachMenu

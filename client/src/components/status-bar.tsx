@@ -149,6 +149,16 @@ export function StatusBar() {
   // Effective model: explicit override, or the provider's default
   const effectiveModel = config?.aiModel || PROVIDER_DEFAULT_MODELS[provider] || "";
 
+  const { data: mcpStatus } = useQuery<Record<string, { connected: boolean; connecting: boolean; label: string; tools: string[] }>>({
+    queryKey: ["/api/mcp/status"],
+    queryFn: () => apiRequest("GET", "/api/mcp/status").then(r => r.json()),
+    refetchInterval: 4000,
+  });
+
+  const mcpEntries = Object.entries(mcpStatus || {});
+  const connectedCount = mcpEntries.filter(([, v]) => v.connected).length;
+  const connectingCount = mcpEntries.filter(([, v]) => v.connecting).length;
+
   return (
     <div className="h-6 border-t border-border/50 bg-background/80 backdrop-blur-sm flex items-center px-3 text-[10px] text-muted-foreground gap-0 shrink-0 select-none">
       {/* Tokens section */}
@@ -277,6 +287,49 @@ export function StatusBar() {
 
       {/* Right-aligned spacer */}
       <div className="flex-1" />
+
+      {/* MCP server status dots */}
+      {mcpEntries.length > 0 && (
+        <Tooltip>
+          <TooltipTrigger asChild>
+            <div className="flex items-center gap-0.5 px-1.5 h-full cursor-default">
+              {mcpEntries.map(([name, srv]) => (
+                <span
+                  key={name}
+                  className={`w-1.5 h-1.5 rounded-full ${
+                    srv.connected
+                      ? "bg-green-500"
+                      : srv.connecting
+                        ? "bg-yellow-400 animate-pulse"
+                        : "bg-muted-foreground/30"
+                  }`}
+                />
+              ))}
+            </div>
+          </TooltipTrigger>
+          <TooltipContent side="top" className="text-xs max-w-xs">
+            <div className="font-medium mb-1">MCP Servers</div>
+            <div className="space-y-0.5">
+              {mcpEntries.map(([name, srv]) => (
+                <div key={name} className="flex items-center gap-1.5">
+                  <span className={`w-1.5 h-1.5 rounded-full shrink-0 ${
+                    srv.connected ? "bg-green-500" : srv.connecting ? "bg-yellow-400" : "bg-muted-foreground/30"
+                  }`} />
+                  <span>{srv.label || name}</span>
+                  <span className="opacity-50 ml-auto pl-2">
+                    {srv.connected ? `${srv.tools.length} tools` : srv.connecting ? "connecting…" : "off"}
+                  </span>
+                </div>
+              ))}
+            </div>
+            {connectedCount > 0 && <div className="mt-1 opacity-60">{connectedCount} of {mcpEntries.length} connected</div>}
+            {connectingCount > 0 && <div className="text-yellow-400">{connectingCount} starting…</div>}
+          </TooltipContent>
+        </Tooltip>
+      )}
+
+      {/* Separator before version */}
+      {mcpEntries.length > 0 && <div className="w-px h-3 bg-border/50 mx-0.5" />}
 
       {/* Version */}
       <span className="px-1 opacity-50">v{info?.version || "1.0.0"}</span>

@@ -264,6 +264,74 @@ function NoteListItem({
   );
 }
 
+// ============ File Preview Panel ============
+interface FileContentResult {
+  type: "text" | "image" | "spreadsheet";
+  content?: string;
+  ext?: string;
+  name?: string;
+  base64?: string;
+  mimeType?: string;
+  rows?: any[][];
+  sheetName?: string;
+  sheets?: string[];
+}
+
+function FilePreviewPanel({ vaultId, filePath }: { vaultId: string; filePath: string }) {
+  const ext = filePath.split(".").pop()?.toLowerCase() || "";
+  const { data, isLoading, error } = useQuery<FileContentResult>({
+    queryKey: ["/api/vaults", vaultId, "file-content", filePath],
+    queryFn: () => apiRequest("GET", `/api/vaults/${vaultId}/file-content?path=${encodeURIComponent(filePath)}`).then(r => r.json()),
+    staleTime: 30000,
+  });
+
+  if (isLoading) return <div className="flex-1 flex items-center justify-center"><span className="text-sm text-muted-foreground">Loading preview…</span></div>;
+  if (error || !data) return <div className="flex-1 flex items-center justify-center"><span className="text-sm text-muted-foreground/50">Cannot preview this file.</span></div>;
+
+  if (data.type === "image") {
+    return (
+      <div className="flex-1 flex items-center justify-center p-4 overflow-auto">
+        <img src={`data:${data.mimeType};base64,${data.base64}`} alt={data.name} className="max-w-full max-h-full object-contain rounded-lg" />
+      </div>
+    );
+  }
+
+  if (data.type === "spreadsheet" && data.rows) {
+    return (
+      <div className="flex-1 overflow-auto p-4">
+        <div className="text-xs text-muted-foreground mb-2">{data.sheetName || "Sheet"} — {data.rows.length} rows</div>
+        <table className="text-xs border-collapse w-full">
+          <tbody>
+            {data.rows.slice(0, 500).map((row, ri) => (
+              <tr key={ri} className={ri === 0 ? "bg-muted/30 font-medium" : "hover:bg-muted/10"}>
+                {(row as any[]).map((cell, ci) => (
+                  <td key={ci} className="border border-border/30 px-2 py-0.5 max-w-[200px] truncate">{String(cell ?? "")}</td>
+                ))}
+              </tr>
+            ))}
+          </tbody>
+        </table>
+        {data.rows.length > 500 && <p className="text-xs text-muted-foreground mt-2">{data.rows.length - 500} more rows not shown</p>}
+      </div>
+    );
+  }
+
+  const CODE_EXTS = ["js", "ts", "jsx", "tsx", "py", "go", "rs", "java", "cpp", "c", "sh", "json", "yaml", "yml", "toml", "xml", "html", "css", "scss"];
+  const isCode = CODE_EXTS.includes(ext);
+  if (isCode) {
+    return (
+      <div className="flex-1 overflow-auto p-4">
+        <pre className="text-xs font-mono bg-muted/20 rounded-lg p-4 overflow-x-auto whitespace-pre-wrap break-all"><code>{data.content}</code></pre>
+      </div>
+    );
+  }
+  return (
+    <div className="flex-1 overflow-auto p-4">
+      <pre className="text-xs text-foreground/80 whitespace-pre-wrap font-mono leading-relaxed">{data.content}</pre>
+    </div>
+  );
+}
+
 // ============ Main Notes Page ============
 export default function NotesPage() {
   const [selectedNote, setSelectedNote] = useState<Note | null>(null);
@@ -284,6 +352,7 @@ export default function NotesPage() {
   const [chatOpen, setChatOpen] = useState(true);
   const [viewMode, setViewMode] = useState<"edit" | "preview">("edit");
   const [contextNoteIds, setContextNoteIds] = useState<Set<string>>(new Set());
+  const [contextFiles, setContextFiles] = useState<Array<{ path: string; name: string; content: string; type: string }>>([]);
   const fileInputRef = useRef<HTMLInputElement>(null);
   const dumpFileRef = useRef<HTMLInputElement>(null);
   const editTextareaRef = useRef<HTMLTextAreaElement>(null);
@@ -404,6 +473,23 @@ export default function NotesPage() {
       }
     } catch { /* not a note yet */ }
   }, [vaultId]);
+
+  const handleAddFileToContext = useCallback(async (node: FileNode) => {
+    if (!vaultId) return;
+    if (contextFiles.some(f => f.path === node.path)) return;
+    try {
+      const result = await apiRequest("GET", `/api/vaults/${vaultId}/file-content?path=${encodeURIComponent(node.path)}`).then(r => r.json());
+      let content = "";
+      if (result.type === "text") {
+        content = result.content;
+      } else if (result.type === "spreadsheet") {
+        content = result.rows.map((row: any[]) => row.join("\t")).join("\n");
+      } else if (result.type === "image") {
+        content = `[Image: ${node.name}]`;
+      }
+      setContextFiles(prev => [...prev, { path: node.path, name: node.name, content, type: result.type }]);
+    } catch { /* silently fail */ }
+  }, [vaultId, contextFiles]);
 
   // Keyboard shortcut: Cmd/Ctrl+S to save
   useEffect(() => {
@@ -557,19 +643,21 @@ export default function NotesPage() {
     });
   }, []);
 
-  // Build the chat context: all explicitly added notes + the selected note
+  // Build the chat context: all explicitly added notes + the selected note + context files
   const chatContext = useMemo(() => {
     const ids = new Set(contextNoteIds);
     if (selectedNote) ids.add(selectedNote.id);
-    return notes
+    const noteItems = notes
       .filter(n => ids.has(n.id))
-      .map(n => ({
-        type: "note" as const,
-        title: n.title,
-        content: n.content,
-        id: n.id,
-      }));
-  }, [contextNoteIds, selectedNote, notes]);
+      .map(n => ({ type: "note" as const, title: n.title, content: n.content, id: n.id }));
+    const fileItems = contextFiles.map(f => ({
+      type: "note" as const,
+      title: f.name,
+      content: f.content,
+      id: f.path,
+    }));
+    return [...noteItems, ...fileItems];
+  }, [contextNoteIds, selectedNote, notes, contextFiles]);
 
   // All notes as available items for @mention
   const availableItems = useMemo(() =>
@@ -621,6 +709,7 @@ export default function NotesPage() {
               vaultId={vaultId!}
               selectedPath={selectedFilePath}
               onFileSelect={handleFileSelect}
+              onAddToContext={handleAddFileToContext}
             />
           ) : (
             <>
@@ -821,7 +910,9 @@ export default function NotesPage() {
 
         {/* Note content area */}
         <div className="flex-1 flex flex-col min-w-0">
-          {!selectedNote ? (
+          {!selectedNote && isFileBrowser && selectedFilePath ? (
+            <FilePreviewPanel vaultId={vaultId || ""} filePath={selectedFilePath} />
+          ) : !selectedNote ? (
             <div className="flex-1 flex items-center justify-center">
               <div className="text-center">
                 <div className="w-14 h-14 rounded-2xl bg-muted/20 border border-dashed border-border/40 flex items-center justify-center mx-auto mb-3">

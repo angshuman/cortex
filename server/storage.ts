@@ -1259,7 +1259,10 @@ export class VaultManager {
         apiKeys: { openai: "", anthropic: "", grok: "", google: "" },
         vectorSearch: "local" as const,
         browserBackend: "playwright-mcp" as const,
-        mcpServers: {},
+        mcpServers: {
+          fetch: { command: "npx", args: ["-y", "@modelcontextprotocol/server-fetch"] },
+          memory: { command: "npx", args: ["-y", "@modelcontextprotocol/server-memory"] },
+        },
         theme: "system" as const,
         agent: {
           maxTurns: 10,
@@ -1273,7 +1276,20 @@ export class VaultManager {
       writeJson(configPath, config);
       return config as Config;
     }
-    return readJson(configPath, {} as Config);
+    const config = readJson(configPath, {} as Config);
+    // One-time migration: add default utility MCP servers (fetch + memory) if user hasn't configured any
+    if (!config._defaultMcpAdded) {
+      config.mcpServers = config.mcpServers || {};
+      if (!("fetch" in config.mcpServers)) {
+        config.mcpServers.fetch = { command: "npx", args: ["-y", "@modelcontextprotocol/server-fetch"] };
+      }
+      if (!("memory" in config.mcpServers)) {
+        config.mcpServers.memory = { command: "npx", args: ["-y", "@modelcontextprotocol/server-memory"] };
+      }
+      (config as any)._defaultMcpAdded = true;
+      writeJson(configPath, config);
+    }
+    return config;
   }
 
   saveConfig(config: Partial<Config>): Config {

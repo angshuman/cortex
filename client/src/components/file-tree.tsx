@@ -34,6 +34,7 @@ interface FileTreeProps {
   vaultId: string;
   selectedPath?: string | null;
   onFileSelect: (node: FileNode) => void;
+  onAddToContext?: (node: FileNode) => void;
 }
 
 function getFileIcon(node: FileNode) {
@@ -77,6 +78,7 @@ function TreeNode({
   onRenameCommit,
   onRenameChange,
   onRenameCancel,
+  onAddToContext,
 }: {
   node: FileNode;
   depth: number;
@@ -89,7 +91,8 @@ function TreeNode({
   onRenameCommit: () => void;
   onRenameChange: (name: string) => void;
   onRenameCancel: () => void;
-}) {
+  onAddToContext?: (node: FileNode) => void;
+}){
   const isExpanded = expandedDirs.has(node.path);
   const isSelected = selectedPath === node.path;
   const isDir = node.type === "directory";
@@ -104,6 +107,11 @@ function TreeNode({
         style={{ paddingLeft: `${indent + 4}px` }}
         onClick={() => { if (isDir) onToggle(node.path); else onSelect(node); }}
         onContextMenu={(e) => { e.preventDefault(); onContextMenu(e, node); }}
+        draggable={!isDir}
+        onDragStart={!isDir ? (e) => {
+          e.dataTransfer.setData("cortex/filepath", node.path);
+          e.dataTransfer.setData("cortex/filename", node.name);
+        } : undefined}
       >
         {/* Expand/collapse arrow */}
         <span className="w-3.5 h-3.5 flex items-center justify-center shrink-0">
@@ -138,6 +146,15 @@ function TreeNode({
         ) : (
           <span className="text-xs truncate flex-1 leading-5">{node.name}</span>
         )}
+        {!isDir && !isRenaming && onAddToContext && (
+          <button
+            className="opacity-0 group-hover:opacity-100 w-4 h-4 flex items-center justify-center rounded-sm hover:bg-primary/20 text-muted-foreground hover:text-primary transition-all shrink-0"
+            title="Add to chat context"
+            onClick={(e) => { e.stopPropagation(); onAddToContext(node); }}
+          >
+            <Plus className="w-3 h-3" />
+          </button>
+        )}
       </div>
 
       {/* Children */}
@@ -157,6 +174,7 @@ function TreeNode({
               onRenameCommit={onRenameCommit}
               onRenameChange={onRenameChange}
               onRenameCancel={onRenameCancel}
+              onAddToContext={onAddToContext}
             />
           ))}
         </div>
@@ -165,7 +183,7 @@ function TreeNode({
   );
 }
 
-export function FileTree({ vaultId, selectedPath, onFileSelect }: FileTreeProps) {
+export function FileTree({ vaultId, selectedPath, onFileSelect, onAddToContext }: FileTreeProps) {
   const queryClient = useQueryClient();
   const [expandedDirs, setExpandedDirs] = useState<Set<string>>(new Set());
   const [contextMenu, setContextMenu] = useState<ContextMenu | null>(null);
@@ -337,6 +355,7 @@ export function FileTree({ vaultId, selectedPath, onFileSelect }: FileTreeProps)
             onRenameCommit={handleRenameCommit}
             onRenameChange={(name) => setRenamingNode(prev => prev ? { ...prev, name } : null)}
             onRenameCancel={() => setRenamingNode(null)}
+            onAddToContext={onAddToContext}
           />
         ))}
       </div>

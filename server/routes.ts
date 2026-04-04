@@ -207,6 +207,53 @@ export function registerRoutes(server: Server, app: Express) {
     }
   });
 
+  // Serve raw file content for preview and context injection
+  app.get("/api/vaults/:id/file-content", async (req, res) => {
+    const vault = vaultManager.getVault(req.params.id);
+    if (!vault) return res.status(404).json({ error: "Vault not found" });
+    const rootFolder = vault.settings?.folderPath;
+    if (!rootFolder) return res.status(400).json({ error: "Vault has no folder path" });
+
+    const relPath = req.query.path as string;
+    if (!relPath) return res.status(400).json({ error: "path is required" });
+    const absPath = path.join(rootFolder, relPath);
+    if (!absPath.startsWith(rootFolder)) return res.status(403).json({ error: "Forbidden" });
+
+    try {
+      const ext = path.extname(relPath).toLowerCase();
+      const IMAGE_EXTS = [".png", ".jpg", ".jpeg", ".gif", ".webp", ".avif", ".svg"];
+      const SHEET_EXTS = [".xlsx", ".xls", ".csv"];
+
+      if (IMAGE_EXTS.includes(ext)) {
+        const buf = fs.readFileSync(absPath);
+        const mime = ext === ".svg" ? "image/svg+xml" : `image/${ext.slice(1).replace("jpg", "jpeg")}`;
+        return res.json({ type: "image", mimeType: mime, base64: buf.toString("base64"), name: path.basename(relPath) });
+      }
+
+      if (SHEET_EXTS.includes(ext)) {
+        const { default: XLSX } = await import("xlsx");
+        if (ext === ".csv") {
+          const raw = fs.readFileSync(absPath, "utf-8");
+          const ws = XLSX.utils.csv_to_sheet(raw);
+          const rows: any[][] = XLSX.utils.sheet_to_json(ws, { header: 1, defval: "" });
+          return res.json({ type: "spreadsheet", rows, name: path.basename(relPath) });
+        } else {
+          const wb = XLSX.readFile(absPath);
+          const sheetName = wb.SheetNames[0];
+          const ws = wb.Sheets[sheetName];
+          const rows: any[][] = XLSX.utils.sheet_to_json(ws, { header: 1, defval: "" });
+          return res.json({ type: "spreadsheet", rows, sheetName, sheets: wb.SheetNames, name: path.basename(relPath) });
+        }
+      }
+
+      // All other files: return as text (truncate at 200k chars)
+      const raw = fs.readFileSync(absPath, "utf-8");
+      return res.json({ type: "text", content: raw.length > 200000 ? raw.slice(0, 200000) + "\n\n[Truncated]" : raw, ext: ext.slice(1), name: path.basename(relPath) });
+    } catch (err: any) {
+      res.status(500).json({ error: err.message });
+    }
+  });
+
   // ============ NOTES (vault-scoped via ?vault=) ============
   app.get("/api/notes", (req, res) => {
     const store = getVaultStorage(req);
