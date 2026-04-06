@@ -15,9 +15,7 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import {
   Select,
   SelectContent,
-  SelectGroup,
   SelectItem,
-  SelectLabel,
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
@@ -109,10 +107,11 @@ const CATEGORY_DESCRIPTIONS: Record<string, string> = {
 const PRIORITY_LABELS = ["Always", "High", "Medium", "Low"];
 const PRIORITY_COLORS = ["bg-green-500", "bg-blue-500", "bg-yellow-500", "bg-gray-400"];
 
-// Available models per provider
-const PROVIDER_MODELS: Record<string, { label: string; models: { value: string; label: string }[] }> = {
+// Available models per provider — keep in sync with PROVIDER_DEFAULT_MODELS in agent-llm.ts
+const PROVIDER_MODELS: Record<string, { label: string; defaultModel: string; models: { value: string; label: string }[] }> = {
   anthropic: {
     label: "Anthropic",
+    defaultModel: "claude-opus-4-5",
     models: [
       { value: "claude-opus-4-5", label: "Claude Opus 4.5 (latest)" },
       { value: "claude-sonnet-4-5", label: "Claude Sonnet 4.5" },
@@ -124,25 +123,31 @@ const PROVIDER_MODELS: Record<string, { label: string; models: { value: string; 
   },
   openai: {
     label: "OpenAI",
+    defaultModel: "gpt-4.1",
     models: [
       { value: "gpt-4.1", label: "GPT-4.1 (latest)" },
+      { value: "gpt-4.1-mini", label: "GPT-4.1 Mini (fast)" },
       { value: "gpt-4o", label: "GPT-4o" },
-      { value: "gpt-4o-mini", label: "GPT-4o Mini (fast)" },
-      { value: "gpt-4-turbo", label: "GPT-4 Turbo" },
+      { value: "gpt-4o-mini", label: "GPT-4o Mini" },
       { value: "o3", label: "o3 (reasoning)" },
       { value: "o4-mini", label: "o4-mini (reasoning, fast)" },
     ],
   },
   grok: {
     label: "Grok (xAI)",
+    defaultModel: "grok-4",
     models: [
-      { value: "grok-3", label: "Grok 3 (latest)" },
+      { value: "grok-4", label: "Grok 4 (latest)" },
+      { value: "grok-4-0709", label: "Grok 4 (0709)" },
+      { value: "grok-3", label: "Grok 3" },
       { value: "grok-3-mini", label: "Grok 3 Mini (fast)" },
+      { value: "grok-3-fast", label: "Grok 3 Fast" },
       { value: "grok-2", label: "Grok 2" },
     ],
   },
   google: {
     label: "Google",
+    defaultModel: "gemini-2.5-flash",
     models: [
       { value: "gemini-2.5-pro", label: "Gemini 2.5 Pro (latest)" },
       { value: "gemini-2.5-flash", label: "Gemini 2.5 Flash (fast)" },
@@ -272,29 +277,33 @@ export default function SettingsPage() {
                 <ApiKeySetupDialog open={false} onOpenChange={() => {}} mode="inline" />
                 <div className="mt-3">
                   <Label className="text-xs text-muted-foreground">Model</Label>
-                  <Select
-                    value={config?.aiModel || "__default__"}
-                    onValueChange={(v) => updateConfig.mutate({ aiModel: v === "__default__" ? undefined : v })}
-                  >
-                    <SelectTrigger className="mt-1 text-sm h-8">
-                      <SelectValue placeholder="Auto-detect (default)" />
-                    </SelectTrigger>
-                    <SelectContent>
-                      <SelectItem value="__default__">Auto-detect (default)</SelectItem>
-                      {Object.entries(PROVIDER_MODELS).map(([providerKey, group]) => (
-                        <SelectGroup key={providerKey}>
-                          <SelectLabel className="text-[10px]">{group.label}</SelectLabel>
-                          {group.models.map((m) => (
+                  {(() => {
+                    const currentProvider = config?.aiProvider || info?.provider || "anthropic";
+                    const providerGroup = PROVIDER_MODELS[currentProvider];
+                    const defaultLabel = providerGroup
+                      ? `Default (${providerGroup.defaultModel})`
+                      : "Auto-detect (default)";
+                    return (
+                      <Select
+                        value={config?.aiModel || "__default__"}
+                        onValueChange={(v) => updateConfig.mutate({ aiModel: v === "__default__" ? undefined : v })}
+                      >
+                        <SelectTrigger className="mt-1 text-sm h-8">
+                          <SelectValue placeholder={defaultLabel} />
+                        </SelectTrigger>
+                        <SelectContent>
+                          <SelectItem value="__default__">{defaultLabel}</SelectItem>
+                          {providerGroup?.models.map((m) => (
                             <SelectItem key={m.value} value={m.value} className="text-xs">
                               {m.label}
                             </SelectItem>
                           ))}
-                        </SelectGroup>
-                      ))}
-                    </SelectContent>
-                  </Select>
+                        </SelectContent>
+                      </Select>
+                    );
+                  })()}
                   <p className="text-[10px] text-muted-foreground mt-1">
-                    Override the model used by the AI agent. Leave as Auto-detect to use the provider default.
+                    Model for the active provider. Switching providers resets this to the provider default.
                   </p>
                 </div>
               </Card>

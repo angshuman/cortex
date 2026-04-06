@@ -7,28 +7,55 @@ import { logError } from "./index";
 
 // ── Provider detection ────────────────────────────────────────────────────────
 
+const PROVIDER_DEFAULT_MODELS: Record<string, string> = {
+  anthropic: "claude-opus-4-5",
+  openai: "gpt-4.1",
+  grok: "grok-4",
+  google: "gemini-2.5-flash",
+};
+
 export function detectProvider(): { provider: string; model: string } {
   try {
     const { vaultManager } = require("./storage");
     if (vaultManager) {
+      const config = vaultManager.getConfig();
+
+      // Respect explicit provider preference saved by the user
+      const explicitProvider = config?.aiProvider as string | undefined;
+      const explicitModel = config?.aiModel as string | undefined;
+
+      if (explicitProvider && explicitProvider !== "none") {
+        const key = vaultManager.resolveApiKey(explicitProvider);
+        if (key && key.length > 10) {
+          return {
+            provider: explicitProvider,
+            model: explicitModel || PROVIDER_DEFAULT_MODELS[explicitProvider] || "unknown",
+          };
+        }
+      }
+
+      // No explicit preference — pick the first available key
       const ak = vaultManager.resolveApiKey("anthropic");
       const ok = vaultManager.resolveApiKey("openai");
       const gk = vaultManager.resolveApiKey("grok");
       const goog = vaultManager.resolveApiKey("google");
-      if (ak && ak.length > 10) return { provider: "anthropic", model: "claude-opus-4-5" };
-      if (ok && ok.length > 10) return { provider: "openai", model: "gpt-4.1" };
-      if (gk && gk.length > 10) return { provider: "grok", model: "grok-4" };
-      if (goog && goog.length > 10) return { provider: "google", model: "gemini-2.5-flash" };
+      if (ak && ak.length > 10) return { provider: "anthropic", model: explicitModel || PROVIDER_DEFAULT_MODELS.anthropic };
+      if (ok && ok.length > 10) return { provider: "openai", model: explicitModel || PROVIDER_DEFAULT_MODELS.openai };
+      if (gk && gk.length > 10) return { provider: "grok", model: explicitModel || PROVIDER_DEFAULT_MODELS.grok };
+      if (goog && goog.length > 10) return { provider: "google", model: explicitModel || PROVIDER_DEFAULT_MODELS.google };
     }
   } catch {}
+
+  // Fall back to environment variables
+  const envModel = ""; // no model override from env
   const ak = process.env.ANTHROPIC_API_KEY;
   const ok = process.env.OPENAI_API_KEY;
   const gk = process.env.GROK_API_KEY;
   const goog = process.env.GOOGLE_API_KEY;
-  if (ak && ak.length > 10) return { provider: "anthropic", model: "claude-opus-4-5" };
-  if (ok && ok.length > 10) return { provider: "openai", model: "gpt-4.1" };
-  if (gk && gk.length > 10) return { provider: "grok", model: "grok-4" };
-  if (goog && goog.length > 10) return { provider: "google", model: "gemini-2.5-flash" };
+  if (ak && ak.length > 10) return { provider: "anthropic", model: PROVIDER_DEFAULT_MODELS.anthropic };
+  if (ok && ok.length > 10) return { provider: "openai", model: PROVIDER_DEFAULT_MODELS.openai };
+  if (gk && gk.length > 10) return { provider: "grok", model: PROVIDER_DEFAULT_MODELS.grok };
+  if (goog && goog.length > 10) return { provider: "google", model: PROVIDER_DEFAULT_MODELS.google };
   return { provider: "none", model: "none" };
 }
 

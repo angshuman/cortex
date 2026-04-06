@@ -24,11 +24,11 @@ const PROVIDER_NAMES: Record<string, string> = {
   none: "No Provider",
 };
 
-// Default model per provider (shown when no explicit override is set)
+// Default model per provider — must match PROVIDER_DEFAULT_MODELS in agent-llm.ts
 const PROVIDER_DEFAULT_MODELS: Record<string, string> = {
   openai: "gpt-4.1",
   anthropic: "claude-opus-4-5",
-  grok: "grok-3",
+  grok: "grok-4",
   google: "gemini-2.5-flash",
 };
 
