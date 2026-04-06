@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { sanitizeClaudeMessages } from "../server/agent-llm";
+import { sanitizeClaudeMessages, pickModelForProvider } from "../server/agent-llm";
 
 describe("sanitizeClaudeMessages", () => {
   it("returns empty array for empty input", () => {
@@ -105,5 +105,25 @@ describe("sanitizeClaudeMessages", () => {
     expect(result[0].content.length).toBe(2);
     expect(result[0].content[0].text).toBe("first");
     expect(result[0].content[1].text).toBe("second");
+  });
+});
+
+describe("pickModelForProvider", () => {
+  it("keeps compatible OpenAI models", () => {
+    expect(pickModelForProvider("openai", "gpt-4.1")).toBe("gpt-4.1");
+    expect(pickModelForProvider("openai", "o3")).toBe("o3");
+  });
+
+  it("falls back to provider default for incompatible provider/model pairs", () => {
+    expect(pickModelForProvider("grok", "gpt-4.1")).toBe("grok-4");
+    expect(pickModelForProvider("openai", "grok-4")).toBe("gpt-4.1");
+    expect(pickModelForProvider("google", "claude-opus-4-5")).toBe("gemini-2.5-flash");
+    expect(pickModelForProvider("anthropic", "gemini-2.5-pro")).toBe("claude-opus-4-5");
+  });
+
+  it("falls back to provider default when model is null/empty", () => {
+    expect(pickModelForProvider("grok", null)).toBe("grok-4");
+    expect(pickModelForProvider("openai", "")).toBe("gpt-4.1");
+    expect(pickModelForProvider("anthropic", undefined)).toBe("claude-opus-4-5");
   });
 });
