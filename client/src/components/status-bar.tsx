@@ -142,7 +142,7 @@ export function StatusBar() {
     }
     updateConfig.mutate({
       aiProvider: newProvider,
-      aiModel: undefined, // clear model override so default kicks in
+      aiModel: null, // clear model override so default kicks in (undefined is omitted in JSON)
     });
   };
 

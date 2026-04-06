@@ -286,7 +286,7 @@ export default function SettingsPage() {
                     return (
                       <Select
                         value={config?.aiModel || "__default__"}
-                        onValueChange={(v) => updateConfig.mutate({ aiModel: v === "__default__" ? undefined : v })}
+                        onValueChange={(v) => updateConfig.mutate({ aiModel: v === "__default__" ? null : v })}
                       >
                         <SelectTrigger className="mt-1 text-sm h-8">
                           <SelectValue placeholder={defaultLabel} />

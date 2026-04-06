@@ -14,6 +14,20 @@ const PROVIDER_DEFAULT_MODELS: Record<string, string> = {
   google: "gemini-2.5-flash",
 };
 
+function isModelCompatibleWithProvider(provider: string, model?: string | null): boolean {
+  if (!model) return false;
+  if (provider === "anthropic") return model.startsWith("claude-");
+  if (provider === "openai") return model.startsWith("gpt-") || /^o\d/.test(model);
+  if (provider === "grok") return model.startsWith("grok-");
+  if (provider === "google") return model.startsWith("gemini-");
+  return false;
+}
+
+export function pickModelForProvider(provider: string, requestedModel?: string | null): string {
+  if (isModelCompatibleWithProvider(provider, requestedModel)) return requestedModel!;
+  return PROVIDER_DEFAULT_MODELS[provider] || "unknown";
+}
+
 export function detectProvider(): { provider: string; model: string } {
   try {
     const { vaultManager } = require("./storage");
@@ -22,14 +36,14 @@ export function detectProvider(): { provider: string; model: string } {
 
       // Respect explicit provider preference saved by the user
       const explicitProvider = config?.aiProvider as string | undefined;
-      const explicitModel = config?.aiModel as string | undefined;
+      const explicitModel = config?.aiModel as string | null | undefined;
 
       if (explicitProvider && explicitProvider !== "none") {
         const key = vaultManager.resolveApiKey(explicitProvider);
         if (key && key.length > 10) {
           return {
             provider: explicitProvider,
-            model: explicitModel || PROVIDER_DEFAULT_MODELS[explicitProvider] || "unknown",
+            model: pickModelForProvider(explicitProvider, explicitModel),
           };
         }
       }
@@ -39,10 +53,10 @@ export function detectProvider(): { provider: string; model: string } {
       const ok = vaultManager.resolveApiKey("openai");
       const gk = vaultManager.resolveApiKey("grok");
       const goog = vaultManager.resolveApiKey("google");
-      if (ak && ak.length > 10) return { provider: "anthropic", model: explicitModel || PROVIDER_DEFAULT_MODELS.anthropic };
-      if (ok && ok.length > 10) return { provider: "openai", model: explicitModel || PROVIDER_DEFAULT_MODELS.openai };
-      if (gk && gk.length > 10) return { provider: "grok", model: explicitModel || PROVIDER_DEFAULT_MODELS.grok };
-      if (goog && goog.length > 10) return { provider: "google", model: explicitModel || PROVIDER_DEFAULT_MODELS.google };
+      if (ak && ak.length > 10) return { provider: "anthropic", model: pickModelForProvider("anthropic", explicitModel) };
+      if (ok && ok.length > 10) return { provider: "openai", model: pickModelForProvider("openai", explicitModel) };
+      if (gk && gk.length > 10) return { provider: "grok", model: pickModelForProvider("grok", explicitModel) };
+      if (goog && goog.length > 10) return { provider: "google", model: pickModelForProvider("google", explicitModel) };
     }
   } catch {}
 

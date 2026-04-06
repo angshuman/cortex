@@ -3,6 +3,7 @@ import type { Server } from "http";
 import { WebSocketServer, WebSocket } from "ws";
 import { vaultManager, FileStorage } from "./storage";
 import { Agent, type ContextItem } from "./agent";
+import { pickModelForProvider } from "./agent-llm";
 import { mcpManager } from "./mcp-client";
 import { log, logError } from "./index";
 import type { AskUserFn } from "./agent-types";
@@ -583,7 +584,13 @@ export function registerRoutes(server: Server, app: Express) {
   });
 
   app.patch("/api/config", async (req, res) => {
-    const config = vaultManager.saveConfig(req.body);
+    const body = { ...(req.body || {}) };
+    // Never persist impossible provider/model combinations.
+    // Example bug: provider=grok with aiModel=gpt-4.1 → runtime 400 "Model not found".
+    if (body.aiProvider && Object.prototype.hasOwnProperty.call(body, "aiModel")) {
+      body.aiModel = body.aiModel ? pickModelForProvider(body.aiProvider, body.aiModel) : undefined;
+    }
+    const config = vaultManager.saveConfig(body);
     
     // If browser backend or MCP servers changed, re-init
     if (req.body.browserBackend !== undefined || req.body.mcpServers !== undefined) {
