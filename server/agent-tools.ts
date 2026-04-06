@@ -454,13 +454,47 @@ export async function executeTool(
       }
 
       case "read_file": {
-        const fileText = storage.getFileText(args.id);
-        if (fileText !== null) return fileText;
         const fileMeta = storage.getFiles().find((f: any) => f.id === args.id) as any;
-        if (fileMeta?.mimeType?.startsWith("image/")) {
-          return `[Image file: ${fileMeta.name}. The image is attached as visual content if in chat context.]`;
+        if (!fileMeta) return JSON.stringify({ error: "File not found" });
+
+        const fileData = storage.getFile(args.id);
+        if (!fileData) return JSON.stringify({ error: "File not found" });
+
+        const { buffer, name, mimeType } = fileData;
+        const ext = path.extname(name).toLowerCase();
+
+        // Office documents — extract text using document libraries
+        if (ext === ".docx" || ext === ".doc" || mimeType.includes("word") || mimeType.includes("officedocument.wordprocessing")) {
+          const mammoth = await import("mammoth");
+          const result = await mammoth.extractRawText({ buffer });
+          const text = result.value.trim();
+          return text.length > 0 ? text.slice(0, 20000) : `[${name}: document appears empty]`;
         }
-        return JSON.stringify({ error: "File not found" });
+        if ([".xlsx", ".xls", ".ods"].includes(ext) || mimeType.includes("spreadsheet") || mimeType.includes("excel")) {
+          const XLSX = await import("xlsx");
+          const wb = XLSX.read(buffer);
+          const parts: string[] = [];
+          for (const sheetName of wb.SheetNames) {
+            const rows: any[][] = XLSX.utils.sheet_to_json(wb.Sheets[sheetName], { header: 1 });
+            parts.push(`=== Sheet: ${sheetName} ===\n${rows.map(r => r.join("\t")).join("\n")}`);
+          }
+          return parts.join("\n\n").slice(0, 20000);
+        }
+        if (ext === ".pdf" || mimeType.includes("pdf")) {
+          const pdfParse = (await import("pdf-parse")).default;
+          const data = await pdfParse(buffer);
+          return data.text.slice(0, 20000);
+        }
+
+        // Images — visual content, can't return as text
+        if (mimeType.startsWith("image/")) {
+          return `[Image file: ${name}. The image is attached as visual content if in chat context.]`;
+        }
+
+        // Plain text / code / other text-based files
+        const text = storage.getFileText(args.id);
+        if (text !== null) return text;
+        return `[Binary file: ${name} (${mimeType}) — cannot display as text]`;
       }
 
       case "search_files": {

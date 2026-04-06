@@ -629,18 +629,20 @@ export class FileStorage {
     const { buffer, name, mimeType } = file;
     // Images — handled separately as visual content
     if (mimeType.startsWith("image/")) return null;
+    // Office documents — check BEFORE the generic XML/text check because
+    // "application/vnd.openxmlformats-officedocument.*" contains "xml" in "openxmlformats"
+    if (mimeType.includes("word") || mimeType.includes("spreadsheet") ||
+        mimeType.includes("presentation") || mimeType.includes("excel") ||
+        mimeType.includes("powerpoint") || mimeType.includes("officedocument")) {
+      return `[Office document: ${name} — use the read_document or read_spreadsheet tool to extract text]`;
+    }
+    // PDF placeholder
+    if (mimeType.includes("pdf")) return `[PDF file: ${name} — use the read_document tool to extract text]`;
     // Text, code, JSON, CSV, XML, YAML etc
     if (mimeType.startsWith("text/") || mimeType.includes("json") || mimeType.includes("xml") ||
         mimeType.includes("yaml") || mimeType.includes("csv") || mimeType.includes("javascript") ||
         mimeType.includes("typescript") || mimeType.includes("markdown")) {
       return buffer.toString("utf-8");
-    }
-    // PDF placeholder
-    if (mimeType.includes("pdf")) return `[PDF file: ${name}]`;
-    // Office docs placeholder
-    if (mimeType.includes("word") || mimeType.includes("document") || mimeType.includes("spreadsheet") ||
-        mimeType.includes("presentation") || mimeType.includes("excel") || mimeType.includes("powerpoint")) {
-      return `[Office document: ${name}]`;
     }
     return `[Binary file: ${name} (${mimeType})]`;
   }
