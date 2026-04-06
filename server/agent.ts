@@ -177,33 +177,47 @@ export class Agent {
     if (!session?.events?.length) return;
 
     for (const event of session.events) {
-      if (event.type !== "message") continue;
-      const role = event.metadata?.role as "user" | "assistant" | undefined;
-      if (!role) continue;
+      if (event.type === "message") {
+        const role = event.metadata?.role as "user" | "assistant" | undefined;
+        if (!role) continue;
 
-      if (role === "user") {
-        const imageUrls: string[] = event.metadata?.images || [];
-        if (imageUrls.length > 0) {
-          const mimeMap: Record<string, string> = {
-            png: "image/png", jpg: "image/jpeg", jpeg: "image/jpeg",
-            gif: "image/gif", webp: "image/webp",
-          };
-          const blocks: ContentBlock[] = imageUrls.map(url => ({
-            type: "image" as const,
-            url,
-            mediaType: mimeMap[url.split(".").pop()?.toLowerCase() || ""] || "image/png",
-          }));
-          const textContent = event.content.replace(/!\[image\]\([^)]+\)\n?/g, "").trim();
-          blocks.push({ type: "text", text: textContent || "(user sent an image)" });
-          this.messages.push({ role: "user", content: blocks });
+        if (role === "user") {
+          const imageUrls: string[] = event.metadata?.images || [];
+          if (imageUrls.length > 0) {
+            const mimeMap: Record<string, string> = {
+              png: "image/png", jpg: "image/jpeg", jpeg: "image/jpeg",
+              gif: "image/gif", webp: "image/webp",
+            };
+            const blocks: ContentBlock[] = imageUrls.map(url => ({
+              type: "image" as const,
+              url,
+              mediaType: mimeMap[url.split(".").pop()?.toLowerCase() || ""] || "image/png",
+            }));
+            const textContent = event.content.replace(/!\[image\]\([^)]+\)\n?/g, "").trim();
+            blocks.push({ type: "text", text: textContent || "(user sent an image)" });
+            this.messages.push({ role: "user", content: blocks });
+          } else {
+            this.messages.push({ role: "user", content: event.content });
+          }
         } else {
-          this.messages.push({ role: "user", content: event.content });
+          this.messages.push({ role: "assistant", content: event.content });
         }
-      } else if (role === "assistant") {
-        this.messages.push({ role: "assistant", content: event.content });
+
+      } else if (event.type === "tool_call") {
+        // Replay tool invocations so the model knows what actions were taken in prior turns.
+        const args = event.content.length > 500 ? event.content.slice(0, 500) + "…" : event.content;
+        this.messages.push({ role: "assistant", content: `[Tool: ${event.metadata?.tool}] ${args}` });
+
+      } else if (event.type === "tool_result") {
+        // Replay tool results so the model has the data from previous turns.
+        // Truncate to avoid filling context with large document dumps.
+        const MAX = 2000;
+        const result = event.content.length > MAX
+          ? event.content.slice(0, MAX) + `\n…[truncated — ${event.content.length - MAX} chars omitted]`
+          : event.content;
+        this.messages.push({ role: "user", content: `[Tool Result for ${event.metadata?.tool}]: ${result}` });
       }
-      // thought, tool_call, tool_result events are intentionally skipped —
-      // the final assistant message already encapsulates the conversation for replay.
+      // thought / intent events are display-only — not needed for model reasoning
     }
   }
 
