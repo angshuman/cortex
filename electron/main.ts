@@ -1,4 +1,4 @@
-import { app, BrowserWindow, Tray, Menu, nativeImage, shell, dialog, ipcMain } from "electron";
+import { app, BrowserWindow, Tray, Menu, nativeImage, shell, dialog, ipcMain, utilityProcess } from "electron";
 import path from "path";
 import { createServer } from "http";
 import net from "net";
@@ -41,50 +41,59 @@ function findAvailablePort(): Promise<number> {
   });
 }
 
+let serverProcess: Electron.UtilityProcess | null = null;
+
 // ============ Start Express Server ============
 async function startServer(port: number): Promise<void> {
-  // Set env vars before importing the server
-  process.env.NODE_ENV = "production";
-  process.env.PORT = String(port);
-  process.env.CORTEX_DATA_DIR = getDataDir();
-  process.env.ELECTRON = "1";
-
-  // The built server bundle is at dist/index.cjs
-  // __dirname in dev = dist/electron/, so ../index.cjs reaches dist/index.cjs
-  // In packaged app, it's copied to resources/server/index.cjs via extraResources
   const serverPath = app.isPackaged
     ? path.join(process.resourcesPath, "server", "index.cjs")
     : path.join(__dirname, "..", "index.cjs");
 
-  // Import the server — it self-starts via its IIFE
-  return new Promise((resolve, reject) => {
-    try {
-      console.log(`[Cortex] Loading server from: ${serverPath}`);
-      require(serverPath);
-      console.log("[Cortex] Server module loaded, waiting for port...");
+  console.log(`[Cortex] Forking server from: ${serverPath}`);
 
-      // Poll until the server is accepting connections
-      let attempts = 0;
-      const maxAttempts = 300; // 30 seconds at 100ms intervals
-      const check = setInterval(() => {
-        attempts++;
-        const testConn = net.createConnection({ port, host: "127.0.0.1" }, () => {
-          testConn.end();
+  // Fork the server as a UtilityProcess — runs in a separate Node.js process
+  // with its own event loop, so sync I/O and CPU work never block the UI.
+  serverProcess = utilityProcess.fork(serverPath, [], {
+    env: {
+      ...process.env,
+      NODE_ENV: "production",
+      PORT: String(port),
+      CORTEX_DATA_DIR: getDataDir(),
+      ELECTRON: "1",
+    },
+    stdio: "pipe",
+  });
+
+  serverProcess.stdout?.on("data", (chunk: Buffer) => {
+    process.stdout.write(`[server] ${chunk}`);
+  });
+  serverProcess.stderr?.on("data", (chunk: Buffer) => {
+    process.stderr.write(`[server] ${chunk}`);
+  });
+  serverProcess.on("exit", (code) => {
+    console.error(`[Cortex] Server process exited with code ${code}`);
+    serverProcess = null;
+  });
+
+  // Poll until the server is accepting connections
+  return new Promise((resolve, reject) => {
+    let attempts = 0;
+    const maxAttempts = 300; // 30 s at 100 ms intervals
+    const check = setInterval(() => {
+      attempts++;
+      const testConn = net.createConnection({ port, host: "127.0.0.1" }, () => {
+        testConn.end();
+        clearInterval(check);
+        console.log(`[Cortex] Server ready at http://127.0.0.1:${port}`);
+        resolve();
+      });
+      testConn.on("error", () => {
+        if (attempts >= maxAttempts) {
           clearInterval(check);
-          resolve();
-        });
-        testConn.on("error", () => {
-          // Not ready yet, keep checking
-          if (attempts >= maxAttempts) {
-            clearInterval(check);
-            reject(new Error("Server did not start within 30 seconds"));
-          }
-        });
-      }, 100);
-    } catch (err) {
-      console.error("[Cortex] Failed to load server module:", err);
-      reject(err);
-    }
+          reject(new Error("Server did not start within 30 seconds"));
+        }
+      });
+    }, 100);
   });
 }
 
@@ -346,5 +355,10 @@ app.on("before-quit", () => {
   if (tray) {
     tray.destroy();
     tray = null;
+  }
+  // Terminate the server utility process
+  if (serverProcess) {
+    serverProcess.kill();
+    serverProcess = null;
   }
 });
