@@ -125,6 +125,17 @@ export const chatSessionSchema = z.object({
   tokenUsage: z.object({ input: z.number(), output: z.number() }).optional(),
   /** Input tokens of the most recent LLM call — tracks how full the context window is. */
   contextTokens: z.number().optional(),
+  /**
+   * File context items attached to this session. Persisted across turns so that
+   * files attached in message 1 are still available as context in message 5.
+   */
+  pinnedContext: z.array(z.object({
+    type: z.string(),
+    title: z.string(),
+    content: z.string(),
+    id: z.string().optional(),
+    mimeType: z.string().optional(),
+  })).optional(),
 });
 export type ChatSession = z.infer<typeof chatSessionSchema>;
 

@@ -966,8 +966,26 @@ export function registerRoutes(server: Server, app: Express) {
             });
           }
 
+          // Merge newly attached files with files pinned from previous turns in this session.
+          // This ensures that a file attached in message 1 is still in context in message 5.
+          const session = store.getSession(sessionId);
+          const previouslyPinned: ContextItem[] = (session?.pinnedContext as ContextItem[]) || [];
+
+          // Add newly attached files to the pinned set (deduplicate by id or title)
+          const newFileIds = new Set(context.filter(c => c.id).map(c => c.id));
+          const newFileTitles = new Set(context.map(c => c.title));
+          const retained = previouslyPinned.filter(p =>
+            !newFileIds.has(p.id) && !newFileTitles.has(p.title)
+          );
+          const mergedContext: ContextItem[] = [...retained, ...context];
+
+          // Save updated pinned context back to session (only file-type items)
+          if (context.length > 0 || previouslyPinned.length !== retained.length) {
+            store.updateSession(sessionId, { pinnedContext: mergedContext as any });
+          }
+
           const agentSettings = globalConfig.agent || undefined;
-          const agent = new Agent(sessionId, (event) => broadcast(event), context, store, vaultSettings, agentSettings);
+          const agent = new Agent(sessionId, (event) => broadcast(event), mergedContext, store, vaultSettings, agentSettings);
 
           if (!activeAgents.has(sessionId)) {
             activeAgents.set(sessionId, { agent, ws: new Set([ws]) });
