@@ -1262,7 +1262,7 @@ export class VaultManager {
         vectorSearch: "local" as const,
         browserBackend: "playwright-mcp" as const,
         mcpServers: {
-          fetch: { command: "npx", args: ["-y", "@modelcontextprotocol/server-fetch"] },
+          fetch: { command: "python", args: ["-m", "mcp_server_fetch"] },
           memory: { command: "npx", args: ["-y", "@modelcontextprotocol/server-memory"] },
         },
         theme: "system" as const,
@@ -1283,12 +1283,23 @@ export class VaultManager {
     if (!config._defaultMcpAdded) {
       config.mcpServers = config.mcpServers || {};
       if (!("fetch" in config.mcpServers)) {
-        config.mcpServers.fetch = { command: "npx", args: ["-y", "@modelcontextprotocol/server-fetch"] };
+        config.mcpServers.fetch = { command: "python", args: ["-m", "mcp_server_fetch"] };
       }
       if (!("memory" in config.mcpServers)) {
         config.mcpServers.memory = { command: "npx", args: ["-y", "@modelcontextprotocol/server-memory"] };
       }
       (config as any)._defaultMcpAdded = true;
+      writeJson(configPath, config);
+    }
+    // Fix-up: replace the old broken npx fetch command with the correct python one
+    if (!(config as any)._fetchCommandFixed) {
+      config.mcpServers = config.mcpServers || {};
+      if (config.mcpServers.fetch &&
+          (config.mcpServers.fetch as any).command === "npx" &&
+          JSON.stringify((config.mcpServers.fetch as any).args).includes("server-fetch")) {
+        config.mcpServers.fetch = { command: "python", args: ["-m", "mcp_server_fetch"] };
+      }
+      (config as any)._fetchCommandFixed = true;
       writeJson(configPath, config);
     }
     return config;
