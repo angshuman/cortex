@@ -3,7 +3,7 @@ import OpenAI from "openai";
 import { FileStorage } from "./storage";
 import type { AgentSettings } from "@shared/schema";
 import type { AgentMessage, ToolDef, EmitFn, AskUserFn } from "./agent-types";
-import { resolveKey, supportsExtendedThinking, messagesToClaude, messagesToOpenAI } from "./agent-llm";
+import { resolveKey, supportsExtendedThinking, messagesToClaude, messagesToOpenAI, sanitizeClaudeMessages } from "./agent-llm";
 import { executeTool } from "./agent-tools";
 import { log, logError } from "./index";
 
@@ -81,7 +81,7 @@ async function runClaude(
       model,
       max_tokens: maxTokens,
       system: systemPrompt,
-      messages: claudeMessages,
+      messages: claudeMessages, // sanitized just before stream call below
       tools: claudeTools.length > 0 ? claudeTools : undefined,
     };
 
@@ -94,7 +94,10 @@ async function runClaude(
 
     // ── Think (streaming) ──────────────────────────────────────────────────
     log(`[agent] claude step=${step} calling LLM (stream)`);
-    const stream = client.messages.stream(params as any);
+    // Sanitize before every call: enforce user↔assistant alternation,
+    // merge consecutive same-role messages that can arise from crashed turns or compaction.
+    const sanitized = sanitizeClaudeMessages(claudeMessages);
+    const stream = client.messages.stream({ ...params, messages: sanitized } as any);
 
     // Forward text deltas to the client in real-time
     stream.on("text", (chunk) => emit("delta", chunk));

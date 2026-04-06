@@ -162,16 +162,20 @@ export function imageUrlToBase64(url: string, storage: FileStorage): { base64: s
 
 /** Convert AgentMessage[] to the native Claude messages format. */
 export function messagesToClaude(messages: AgentMessage[], storage: FileStorage): any[] {
-  return messages
-    .filter(m => m.role !== "system")
-    .map(m => {
-      if (typeof m.content === "string") {
-        return { role: m.role as "user" | "assistant", content: m.content };
-      }
+  const result: any[] = [];
+  for (const m of messages) {
+    if (m.role === "system") continue;
+    if (!m.role) continue; // guard: skip messages with missing role
+
+    let content: any;
+    if (typeof m.content === "string") {
+      // Empty string content is rejected by the Anthropic API — replace with a placeholder
+      content = m.content.trim() ? m.content : "(empty)";
+    } else {
       const parts: any[] = [];
       for (const block of m.content) {
         if (block.type === "text") {
-          parts.push({ type: "text", text: block.text });
+          if (block.text?.trim()) parts.push({ type: "text", text: block.text });
         } else if (block.type === "image") {
           const data = imageUrlToBase64(block.url, storage);
           if (data) {
@@ -181,9 +185,61 @@ export function messagesToClaude(messages: AgentMessage[], storage: FileStorage)
             });
           }
         }
+        // other block types (note, task, etc.) are not sent to the LLM
       }
-      return { role: m.role as "user" | "assistant", content: parts.length > 0 ? parts : "" };
-    });
+      // Never send empty content — Anthropic rejects it and reports 'messages[N].role missing'
+      content = parts.length > 0 ? parts : [{ type: "text", text: "(empty)" }];
+    }
+
+    result.push({ role: m.role as "user" | "assistant", content });
+  }
+  return sanitizeClaudeMessages(result);
+}
+
+/**
+ * Ensure the message array satisfies Anthropic's strict alternation requirement:
+ *   - Must start with a user message
+ *   - Must strictly alternate user ↔ assistant
+ *
+ * Consecutive same-role messages arise from:
+ *   1. Crashed turns: previous turn failed after tool calls but before final assistant
+ *      text → history ends with user(tool_result), new user message creates user+user
+ *   2. Compaction mid-turn: claudeMessages is rebuilt ending in "assistant", then the
+ *      current step appends another assistant(tool_use) → assistant+assistant
+ *
+ * Fix: merge consecutive same-role messages by combining their content arrays.
+ * Also drop leading assistant messages (conversation must start with user).
+ */
+export function sanitizeClaudeMessages(messages: any[]): any[] {
+  if (messages.length === 0) return messages;
+
+  // Normalise a content value to an array of content blocks
+  const toBlocks = (c: any): any[] => {
+    if (Array.isArray(c)) return c;
+    if (typeof c === "string" && c) return [{ type: "text", text: c }];
+    return [{ type: "text", text: "(empty)" }];
+  };
+
+  // Drop leading assistant messages — Claude requires user to go first
+  let start = 0;
+  while (start < messages.length && messages[start].role !== "user") start++;
+
+  const merged: any[] = [];
+  for (let i = start; i < messages.length; i++) {
+    const msg = messages[i];
+    const prev = merged[merged.length - 1];
+    if (prev && prev.role === msg.role) {
+      // Merge into the previous message
+      merged[merged.length - 1] = {
+        role: prev.role,
+        content: [...toBlocks(prev.content), ...toBlocks(msg.content)],
+      };
+    } else {
+      merged.push({ role: msg.role, content: msg.content });
+    }
+  }
+
+  return merged;
 }
 
 /** Convert AgentMessage[] to the OpenAI messages format (also used by Grok/Google). */
