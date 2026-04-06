@@ -236,9 +236,16 @@ async function runOpenAI(
     // ── Think (streaming) ──────────────────────────────────────────────────
     log(`[agent] openai step=${step} calling LLM (stream)`);
 
+    const sanitizedOpenAIMessages = openaiMessages.filter(
+      (m) =>
+        m &&
+        typeof m.role === "string" &&
+        (m.content !== undefined || m.tool_calls !== undefined),
+    );
+
     const streamParams: any = {
       model,
-      messages: openaiMessages,
+      messages: sanitizedOpenAIMessages,
       tools: openaiTools.length > 0 ? openaiTools : undefined,
       max_tokens: agentSettings.maxTokens,
       ...(agentSettings.temperature !== undefined ? { temperature: agentSettings.temperature } : {}),
@@ -287,6 +294,7 @@ async function runOpenAI(
     const toolCallsList = Object.values(toolCallAccum);
     // Synthetic message object matching the non-streaming shape
     const msg: any = {
+      role: "assistant",
       content: fullText || null,
       tool_calls: toolCallsList.length > 0 ? toolCallsList : undefined,
     };

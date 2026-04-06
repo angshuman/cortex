@@ -358,6 +358,31 @@ export default function ChatPage() {
             </div>
           );
         }
+        if (event.metadata?.kind === "skills") {
+          const skills: Array<{ name: string; reason: string; instructionsOnly?: boolean; matchedKeywords?: string[] }> = event.metadata?.skills || [];
+          return (
+            <div key={event.id || idx} className="mb-3 rounded-lg bg-emerald-500/5 border border-emerald-500/20 px-3.5 py-2.5">
+              <div className="flex items-start gap-2.5">
+                <Sparkles className="w-4 h-4 text-emerald-500/70 mt-0.5 shrink-0" />
+                <div className="w-full">
+                  <p className="text-[10px] font-semibold text-emerald-600/80 uppercase tracking-wider mb-1">Active Skills</p>
+                  <div className="flex flex-wrap gap-1.5">
+                    {skills.map((s) => (
+                      <span key={`${event.id}-${s.name}`} className="inline-flex items-center gap-1 rounded-full border border-emerald-500/20 bg-background/70 px-2 py-0.5 text-[10px]">
+                        <span className="font-medium">{s.name}</span>
+                        <span className="text-muted-foreground">
+                          {s.reason === "pinned" ? "pinned" : s.reason === "always" ? "always" : s.reason === "keyword" ? "keyword" : "auto"}
+                          {s.instructionsOnly ? " • instructions" : ""}
+                          {s.matchedKeywords?.length ? ` • ${s.matchedKeywords.slice(0, 2).join(", ")}` : ""}
+                        </span>
+                      </span>
+                    ))}
+                  </div>
+                </div>
+              </div>
+            </div>
+          );
+        }
         // Working thought — visible but secondary
         return (
           <div key={event.id || idx} className="flex mb-1.5 gap-3 items-start">

@@ -15,24 +15,75 @@ export type { ContextItem };
 
 // ── Skill selection ───────────────────────────────────────────────────────────
 
-function selectRelevantSkills(
+export interface SkillActivation {
+  skill: Skill;
+  reason: "always" | "pinned" | "keyword" | "no_keywords";
+  matchedKeywords: string[];
+}
+
+function normalizeText(input: string): string {
+  return input
+    .toLowerCase()
+    .replace(/[_-]/g, " ")
+    .replace(/[^\w\s]/g, " ")
+    .replace(/\s+/g, " ")
+    .trim();
+}
+
+function expandKeywordVariants(keyword: string): string[] {
+  const base = normalizeText(keyword);
+  if (!base) return [];
+  const variants = new Set<string>([base]);
+  // lightweight stemming / synonym variants for better trigger hit-rate
+  if (base.endsWith("ing") && base.length > 5) variants.add(base.slice(0, -3));
+  if (base.endsWith("ed") && base.length > 4) variants.add(base.slice(0, -2));
+  if (base.endsWith("s") && base.length > 3) variants.add(base.slice(0, -1));
+  if (base === "research") {
+    variants.add("investigate");
+    variants.add("investigation");
+    variants.add("analyze");
+    variants.add("analysis");
+    variants.add("look into");
+  }
+  return Array.from(variants);
+}
+
+export function selectRelevantSkills(
   allSkills: Skill[],
   userMessage: string,
   contextItems: ContextItem[] = [],
   forcedSkillNames: string[] = [],
-): Skill[] {
-  const combined = (userMessage + " " + contextItems.map(c => c.title + " " + c.content).join(" ")).toLowerCase();
-  const selected: Skill[] = [];
+): SkillActivation[] {
+  const combinedRaw = userMessage + " " + contextItems.map(c => c.title + " " + c.content).join(" ");
+  const combined = normalizeText(combinedRaw);
+  const selected: SkillActivation[] = [];
+  const forced = new Set(forcedSkillNames);
 
   for (const skill of allSkills) {
     if (!skill.enabled) continue;
-    if (forcedSkillNames.includes(skill.name)) { selected.push(skill); continue; }
-    if ((skill.priority ?? 1) === 0) { selected.push(skill); continue; }
-    if (!skill.triggerKeywords || skill.triggerKeywords.length === 0) { selected.push(skill); continue; }
-    if (skill.triggerKeywords.some(kw => combined.includes(kw.toLowerCase()))) selected.push(skill);
+    if (forced.has(skill.name)) {
+      selected.push({ skill, reason: "pinned", matchedKeywords: [] });
+      continue;
+    }
+    if ((skill.priority ?? 1) === 0) {
+      selected.push({ skill, reason: "always", matchedKeywords: [] });
+      continue;
+    }
+    if (!skill.triggerKeywords || skill.triggerKeywords.length === 0) {
+      selected.push({ skill, reason: "no_keywords", matchedKeywords: [] });
+      continue;
+    }
+
+    const matchedKeywords = skill.triggerKeywords.filter((kw) =>
+      expandKeywordVariants(kw).some((variant) => variant && combined.includes(variant))
+    );
+
+    if (matchedKeywords.length > 0) {
+      selected.push({ skill, reason: "keyword", matchedKeywords });
+    }
   }
 
-  selected.sort((a, b) => (a.priority ?? 1) - (b.priority ?? 1));
+  selected.sort((a, b) => (a.skill.priority ?? 1) - (b.skill.priority ?? 1));
   return selected;
 }
 
@@ -48,7 +99,7 @@ function buildSystemPrompt(
 ): string {
   const allSkills = storage.getSkills();
   const relevant = selectRelevantSkills(allSkills, userMessage || "", contextItems || [], forcedSkillNames || []);
-  const skillInstructions = relevant.map((s: Skill) => s.instructions).filter(Boolean).join("\n\n");
+  const skillInstructions = relevant.map((s) => s.skill.instructions).filter(Boolean).join("\n\n");
 
   const notes = storage.getNotes();
   const tasks = storage.getTasks().filter((t: any) => t.status !== "archived");
@@ -300,7 +351,23 @@ Output ONLY valid JSON: { "intent": "..." }`,
     const isImageOnly = !userMessage && (images?.length ?? 0) > 0;
     const intent = await this.extractIntent(effectiveMessage, isImageOnly);
 
+    const skillActivations = selectRelevantSkills(this.storage.getSkills(), effectiveMessage, this.context, forcedSkillNames || []);
     let systemPrompt = buildSystemPrompt(this.storage, this.vaultSettings, this.agentSettings, effectiveMessage, this.context, forcedSkillNames);
+
+    this.emit(
+      "thought",
+      `Activated ${skillActivations.length} skills`,
+      {
+        kind: "skills",
+        skills: skillActivations.map((a) => ({
+          name: a.skill.name,
+          category: a.skill.category,
+          reason: a.reason,
+          instructionsOnly: !!a.skill.instructionsOnly,
+          matchedKeywords: a.matchedKeywords,
+        })),
+      },
+    );
 
     // Inject the extracted intent so the model has a clear goal on every loop turn
     // and can verify it has actually been met before producing a final response.
@@ -320,7 +387,7 @@ Output ONLY valid JSON: { "intent": "..." }`,
       systemPrompt += `\n\n## Active Context\nThe user has shared the following items. Their full content is already included below — use it directly. Do NOT call read_note, read_file, or read_document for these items unless you need to refresh them. If any notes contain images, those images are attached as visual content in this conversation.\n\n${contextBlock}`;
     }
 
-    const tools = getToolDefinitions(this.storage);
+    const tools = getToolDefinitions(this.storage, skillActivations.map((a) => a.skill));
     const emit: EmitFn = this.emit.bind(this);
     const compact = this.compactContext.bind(this);
 

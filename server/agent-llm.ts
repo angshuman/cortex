@@ -260,13 +260,14 @@ export function sanitizeClaudeMessages(messages: any[]): any[] {
 export function messagesToOpenAI(messages: AgentMessage[], systemPrompt: string, storage: FileStorage): any[] {
   const result: any[] = [{ role: "system", content: systemPrompt }];
   for (const m of messages) {
+    if (!m?.role || (m.role !== "user" && m.role !== "assistant" && m.role !== "system")) continue;
     if (typeof m.content === "string") {
-      result.push({ role: m.role, content: m.content });
+      result.push({ role: m.role, content: m.content.trim() ? m.content : "(empty)" });
     } else {
       const parts: any[] = [];
       for (const block of m.content) {
         if (block.type === "text") {
-          parts.push({ type: "text", text: block.text });
+          if (block.text?.trim()) parts.push({ type: "text", text: block.text });
         } else if (block.type === "image") {
           const data = imageUrlToBase64(block.url, storage);
           if (data) {
@@ -277,7 +278,7 @@ export function messagesToOpenAI(messages: AgentMessage[], systemPrompt: string,
           }
         }
       }
-      result.push({ role: m.role, content: parts.length > 0 ? parts : "" });
+      result.push({ role: m.role, content: parts.length > 0 ? parts : "(empty)" });
     }
   }
   return result;

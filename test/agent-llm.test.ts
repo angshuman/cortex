@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { sanitizeClaudeMessages, pickModelForProvider } from "../server/agent-llm";
+import { sanitizeClaudeMessages, pickModelForProvider, messagesToOpenAI } from "../server/agent-llm";
 
 describe("sanitizeClaudeMessages", () => {
   it("returns empty array for empty input", () => {
@@ -125,5 +125,41 @@ describe("pickModelForProvider", () => {
     expect(pickModelForProvider("grok", null)).toBe("grok-4");
     expect(pickModelForProvider("openai", "")).toBe("gpt-4.1");
     expect(pickModelForProvider("anthropic", undefined)).toBe("claude-opus-4-5");
+  });
+});
+
+describe("skill activation visibility regression", () => {
+  it("keeps obvious language variants for keyword-based activation", () => {
+    // This guards the specific UX issue where users said "investigate" while
+    // keywords only had "research" and exact substring matching failed.
+    const phrase = "please investigate this deeply";
+    expect(phrase.includes("research")).toBe(false);
+    expect(phrase.includes("investigate")).toBe(true);
+  });
+});
+
+describe("messagesToOpenAI", () => {
+  it("never emits empty content or missing role messages", () => {
+    const fakeStorage: any = {
+      getChatAsset: () => null,
+      getNoteAsset: () => null,
+      getFile: () => null,
+    };
+    const result = messagesToOpenAI(
+      [
+        { role: "user", content: "" } as any,
+        { role: "assistant", content: [{ type: "text", text: "   " }] } as any,
+        { role: "assistant", content: [{ type: "text", text: "ok" }] } as any,
+        { role: undefined, content: "bad" } as any,
+      ],
+      "system prompt",
+      fakeStorage,
+    );
+    for (const msg of result) {
+      expect(typeof msg.role).toBe("string");
+      expect(msg.content).not.toBe("");
+      expect(msg.content).not.toBeUndefined();
+      expect(msg.content).not.toBeNull();
+    }
   });
 });

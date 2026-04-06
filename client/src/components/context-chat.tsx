@@ -360,6 +360,29 @@ export function ContextChat({ context, open, onClose, placeholder, width, style,
             </div>
           );
         }
+        if (event.metadata?.kind === "skills") {
+          const skills: Array<{ name: string; reason: string; instructionsOnly?: boolean; matchedKeywords?: string[] }> = event.metadata?.skills || [];
+          return (
+            <div key={event.id || idx} className="mb-2 rounded-lg bg-emerald-500/5 border border-emerald-500/20 px-3 py-2">
+              <div className="flex items-start gap-2">
+                <Sparkles className="w-3.5 h-3.5 text-emerald-500/70 mt-0.5 shrink-0" />
+                <div className="w-full">
+                  <p className="text-[9px] font-semibold text-emerald-600/80 uppercase tracking-wider mb-0.5">Active Skills</p>
+                  <div className="flex flex-wrap gap-1">
+                    {skills.map((s) => (
+                      <span key={`${event.id}-${s.name}`} className="inline-flex items-center gap-1 rounded-full border border-emerald-500/20 bg-background/70 px-1.5 py-0.5 text-[9px]">
+                        <span className="font-medium">{s.name}</span>
+                        <span className="text-muted-foreground">
+                          {s.reason === "pinned" ? "pinned" : s.reason === "always" ? "always" : s.reason === "keyword" ? "keyword" : "auto"}
+                        </span>
+                      </span>
+                    ))}
+                  </div>
+                </div>
+              </div>
+            </div>
+          );
+        }
         return (
           <div key={event.id || idx} className="flex mb-1.5 gap-2 items-start">
             <div className="flex-shrink-0 w-6 flex justify-center pt-1.5">

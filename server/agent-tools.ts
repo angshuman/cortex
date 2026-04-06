@@ -150,8 +150,8 @@ const DOCUMENT_TOOL_DEFS: ToolDef[] = [
   },
 ];
 
-export function getToolDefinitions(storage: FileStorage): ToolDef[] {
-  const skills = storage.getSkills().filter((s: Skill) => s.enabled);
+export function getToolDefinitions(storage: FileStorage, selectedSkills?: Skill[]): ToolDef[] {
+  const skills = (selectedSkills ?? storage.getSkills()).filter((s: Skill) => s.enabled);
   const tools: ToolDef[] = [];
 
   // Built-in tool — always available, not skill-based
