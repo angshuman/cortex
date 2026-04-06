@@ -919,14 +919,48 @@ export function registerRoutes(server: Server, app: Express) {
 
           const context: ContextItem[] = data.context || [];
 
-          // Add attached files as context items
+          // Add attached files as context items — extract text eagerly so the model
+          // has content immediately without needing to call a tool with a filesystem path
           const attachedFiles: Array<{ id: string; name: string; mimeType: string }> = data.files || [];
           for (const f of attachedFiles) {
-            const fileText = store.getFileText(f.id);
+            const fileData = store.getFile(f.id);
+            let content: string;
+            if (!fileData) {
+              content = `[File: ${f.name} — not found]`;
+            } else {
+              const ext = path.extname(f.name).toLowerCase();
+              try {
+                if ([".docx", ".doc"].includes(ext) || f.mimeType.includes("word") || f.mimeType.includes("officedocument.wordprocessing")) {
+                  const mammoth = await import("mammoth");
+                  const result = await mammoth.extractRawText({ buffer: fileData.buffer });
+                  content = result.value.trim().slice(0, 30000) || `[${f.name}: document appears empty]`;
+                } else if ([".xlsx", ".xls", ".ods"].includes(ext) || f.mimeType.includes("spreadsheet") || f.mimeType.includes("excel")) {
+                  const XLSX = await import("xlsx");
+                  const wb = XLSX.read(fileData.buffer);
+                  const parts: string[] = [];
+                  for (const sheetName of wb.SheetNames) {
+                    const rows: any[][] = XLSX.utils.sheet_to_json(wb.Sheets[sheetName], { header: 1 });
+                    parts.push(`=== Sheet: ${sheetName} ===\n${rows.map((r: any[]) => r.join("\t")).join("\n")}`);
+                  }
+                  content = parts.join("\n\n").slice(0, 30000);
+                } else if (ext === ".pdf" || f.mimeType.includes("pdf")) {
+                  const pdfParse = (await import("pdf-parse")).default;
+                  const data = await pdfParse(fileData.buffer);
+                  content = data.text.slice(0, 30000);
+                } else if (f.mimeType.startsWith("image/")) {
+                  content = `[Image file: ${f.name} — attached as visual content]`;
+                } else {
+                  content = store.getFileText(f.id) || `[File: ${f.name}]`;
+                }
+              } catch (extractErr: any) {
+                logError(`[routes] failed to extract text from ${f.name}`, extractErr);
+                content = `[File: ${f.name} — could not extract text: ${extractErr.message}]`;
+              }
+            }
             context.push({
               type: "file",
               title: f.name,
-              content: fileText || `[File: ${f.name}]`,
+              content,
               id: f.id,
               mimeType: f.mimeType,
             });

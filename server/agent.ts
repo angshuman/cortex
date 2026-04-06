@@ -303,7 +303,7 @@ Output ONLY valid JSON: { "intent": "..." }`,
           : `Context: "${item.title}"`;
         return `### ${header}\n${item.content}`;
       }).join("\n\n");
-      systemPrompt += `\n\n## Active Context\nThe user is viewing the following items. You already have their full content below — do NOT call read_note unless you need to refresh or read a different note. If any notes contain images, those images are attached as visual content in this conversation so you can see and analyze them. Reference context items directly when relevant.\n\n${contextBlock}`;
+      systemPrompt += `\n\n## Active Context\nThe user has shared the following items. Their full content is already included below — use it directly. Do NOT call read_note, read_file, or read_document for these items unless you need to refresh them. If any notes contain images, those images are attached as visual content in this conversation.\n\n${contextBlock}`;
     }
 
     const tools = getToolDefinitions(this.storage);
