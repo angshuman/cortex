@@ -135,6 +135,39 @@ describe("File content API logic", () => {
   });
 });
 
+describe("Vault-root path resolution", () => {
+  it("writes relative generated files inside vault root", async () => {
+    const { FileStorage } = await import("../server/storage.js");
+    const { executeTool } = await import("../server/agent-tools.js");
+
+    const vaultRoot = path.join(tmpDir, "vault-root");
+    fs.mkdirSync(vaultRoot, { recursive: true });
+    const storage = new FileStorage(path.join(vaultRoot, ".cortex-data"), vaultRoot);
+
+    await executeTool("write_document", { path: "projects\\out.md", content: "hello" }, storage, {
+      maxTurns: 10, maxTokens: 1024, temperature: 0.3, fetchTimeout: 5000, fetchMaxLength: 5000, systemPromptSuffix: "",
+    } as any);
+
+    const expectedPath = path.join(vaultRoot, "projects", "out.md");
+    expect(fs.existsSync(expectedPath)).toBe(true);
+    expect(fs.readFileSync(expectedPath, "utf-8")).toContain("hello");
+  });
+
+  it("rejects paths escaping vault root", async () => {
+    const { FileStorage } = await import("../server/storage.js");
+    const { executeTool } = await import("../server/agent-tools.js");
+
+    const vaultRoot = path.join(tmpDir, "vault-root-escape");
+    fs.mkdirSync(vaultRoot, { recursive: true });
+    const storage = new FileStorage(path.join(vaultRoot, ".cortex-data"), vaultRoot);
+
+    const result = await executeTool("write_document", { path: "..\\outside.md", content: "nope" }, storage, {
+      maxTurns: 10, maxTokens: 1024, temperature: 0.3, fetchTimeout: 5000, fetchMaxLength: 5000, systemPromptSuffix: "",
+    } as any);
+    expect(result).toMatch(/escapes vault root/i);
+  });
+});
+
 // ─── getFileText MIME-type ordering regression ────────────────────────────────
 // Bug: "application/vnd.openxmlformats-officedocument.*" contains "openxmlformats"
 // which includes the substring "xml". If the xml/text check runs before the office

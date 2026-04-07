@@ -156,6 +156,7 @@ export class FileStorage {
   }
 
   getDataDir(): string { return this.dataDir; }
+  getVaultRoot(): string { return this.rootFolder || this.dataDir; }
 
   /** True when this vault points to an external folder (notes live as .md files there). */
   isExternalVault(): boolean { return !!this.rootFolder; }

@@ -6,9 +6,21 @@ import path from "path";
 import fs from "fs";
 
 // ── Document tools (loaded lazily so missing libs don't break startup) ────────
-async function readDocumentFile(filePath: string): Promise<string> {
+function resolveVaultPath(storage: FileStorage, filePath: string): string {
+  const vaultRoot = storage.getVaultRoot();
+  const candidate = path.isAbsolute(filePath) ? filePath : path.join(vaultRoot, filePath);
+  const normalized = path.normalize(candidate);
+  const rootNormalized = path.normalize(vaultRoot);
+  const relative = path.relative(rootNormalized, normalized);
+  if (relative.startsWith("..") || path.isAbsolute(relative)) {
+    throw new Error(`Path escapes vault root: ${filePath}`);
+  }
+  return normalized;
+}
+
+async function readDocumentFile(storage: FileStorage, filePath: string): Promise<string> {
   const ext = path.extname(filePath).toLowerCase();
-  const absPath = path.resolve(filePath);
+  const absPath = resolveVaultPath(storage, filePath);
   if (!fs.existsSync(absPath)) throw new Error(`File not found: ${filePath}`);
 
   if (ext === ".pdf") {
@@ -28,9 +40,9 @@ async function readDocumentFile(filePath: string): Promise<string> {
   throw new Error(`Unsupported document format: ${ext}`);
 }
 
-async function readSpreadsheetFile(filePath: string, sheetName?: string): Promise<string> {
+async function readSpreadsheetFile(storage: FileStorage, filePath: string, sheetName?: string): Promise<string> {
   const ext = path.extname(filePath).toLowerCase();
-  const absPath = path.resolve(filePath);
+  const absPath = resolveVaultPath(storage, filePath);
   if (!fs.existsSync(absPath)) throw new Error(`File not found: ${filePath}`);
 
   if ([".xlsx", ".xls", ".csv", ".ods"].includes(ext)) {
@@ -46,9 +58,9 @@ async function readSpreadsheetFile(filePath: string, sheetName?: string): Promis
   throw new Error(`Unsupported spreadsheet format: ${ext}`);
 }
 
-async function writeDocumentFile(filePath: string, content: string): Promise<void> {
+async function writeDocumentFile(storage: FileStorage, filePath: string, content: string): Promise<void> {
   const ext = path.extname(filePath).toLowerCase();
-  const absPath = path.resolve(filePath);
+  const absPath = resolveVaultPath(storage, filePath);
   fs.mkdirSync(path.dirname(absPath), { recursive: true });
 
   if (ext === ".docx") {
@@ -68,8 +80,8 @@ async function writeDocumentFile(filePath: string, content: string): Promise<voi
   throw new Error(`Unsupported write format: ${ext}`);
 }
 
-async function writeSpreadsheetFile(filePath: string, rowsJson: string, sheetName = "Sheet1"): Promise<void> {
-  const absPath = path.resolve(filePath);
+async function writeSpreadsheetFile(storage: FileStorage, filePath: string, rowsJson: string, sheetName = "Sheet1"): Promise<void> {
+  const absPath = resolveVaultPath(storage, filePath);
   fs.mkdirSync(path.dirname(absPath), { recursive: true });
   const XLSX = await import("xlsx");
   const rows = JSON.parse(rowsJson);
@@ -79,8 +91,8 @@ async function writeSpreadsheetFile(filePath: string, rowsJson: string, sheetNam
   XLSX.writeFile(wb, absPath);
 }
 
-async function listSpreadsheetSheets(filePath: string): Promise<string> {
-  const absPath = path.resolve(filePath);
+async function listSpreadsheetSheets(storage: FileStorage, filePath: string): Promise<string> {
+  const absPath = resolveVaultPath(storage, filePath);
   if (!fs.existsSync(absPath)) throw new Error(`File not found: ${filePath}`);
   const XLSX = await import("xlsx");
   const wb = XLSX.readFile(absPath);
@@ -426,25 +438,25 @@ export async function executeTool(
       }
 
       case "read_document": {
-        const text = await readDocumentFile(args.path as string);
+        const text = await readDocumentFile(storage, args.path as string);
         return text.length > 20000 ? text.slice(0, 20000) + "\n\n[...truncated]" : text;
       }
 
       case "read_spreadsheet": {
-        return await readSpreadsheetFile(args.path as string, args.sheet as string | undefined);
+        return await readSpreadsheetFile(storage, args.path as string, args.sheet as string | undefined);
       }
 
       case "list_spreadsheet_sheets": {
-        return await listSpreadsheetSheets(args.path as string);
+        return await listSpreadsheetSheets(storage, args.path as string);
       }
 
       case "write_document": {
-        await writeDocumentFile(args.path as string, args.content as string);
+        await writeDocumentFile(storage, args.path as string, args.content as string);
         return JSON.stringify({ ok: true, path: args.path });
       }
 
       case "write_spreadsheet": {
-        await writeSpreadsheetFile(args.path as string, args.rows_json as string, args.sheet_name as string | undefined);
+        await writeSpreadsheetFile(storage, args.path as string, args.rows_json as string, args.sheet_name as string | undefined);
         return JSON.stringify({ ok: true, path: args.path });
       }
 
