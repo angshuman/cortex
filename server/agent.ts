@@ -133,6 +133,16 @@ function buildSystemPrompt(
     ? mcpStatusParts.join("\n\n")
     : "No MCP servers connected. The user can add servers in Settings > MCP Servers.";
 
+  const strategy = agentSettings?.loopStrategy || "think-act-observe";
+  const treeMaxDepth = agentSettings?.treeMaxDepth ?? 5;
+  const loopInstruction = strategy === "tree-of-thought"
+    ? `## Reasoning Loop: Tree of Thought (selected)\n- Break the problem into a tree of subproblems (nodes).\n- Expand children only when a node is still ambiguous or too large.\n- Solve leaf nodes, then roll up results to parent nodes.\n- Max tree depth: ${treeMaxDepth}. Do not exceed this depth.\n- If depth limit is reached, choose best-first leaves and proceed with bounded assumptions.\n- Show a concise node trail in thoughts (e.g., Root > Node 1 > Node 1.2).\n- Use tools at leaf nodes, then synthesize at parent nodes.`
+    : strategy === "plan-execute-review"
+      ? `## Reasoning Loop: Plan → Execute → Review (selected)\n- First draft a short plan.\n- Execute tasks in order with tools.\n- Review outputs for gaps/errors and patch before final response.\n- Prefer explicit checklists and verification.`
+      : strategy === "react"
+        ? `## Reasoning Loop: ReAct (selected)\n- Alternate short reasoning and action.\n- Keep thoughts concise, then take one concrete tool/action step.\n- Observe result and decide next best step.\n- Iterate until done, then summarize.`
+        : `## Reasoning Loop: Think → Act → Observe (selected)\n- Think: analyze available context and decide next step.\n- Act: take one or more tool/actions toward the goal.\n- Observe: inspect outcomes and adapt.\n- Repeat until complete.`;
+
   return `You are Cortex — a deep-research AI agent that runs locally. Your purpose is to investigate, reason, and synthesize, then take action or produce polished deliverables. You operate autonomously across many steps.
 
 ## What You Do
@@ -151,6 +161,8 @@ function buildSystemPrompt(
 
 ## Connected MCP Servers
 ${mcpStatus}
+
+${loopInstruction}
 
 ## Image Handling
 When a user sends images:

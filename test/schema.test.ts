@@ -7,6 +7,7 @@ import {
   insertTaskSchema,
   chatEventSchema,
   chatSessionSchema,
+  configSchema,
 } from "../shared/schema.js";
 
 describe("insertNoteSchema", () => {
@@ -103,6 +104,25 @@ describe("chatEventSchema type enum", () => {
   it("rejects unknown event type", () => {
     const result = chatEventSchema.shape.type.safeParse("unknown_type");
     expect(result.success).toBe(false);
+  });
+});
+
+describe("configSchema agent loop settings", () => {
+  it("accepts loopStrategy and treeMaxDepth", () => {
+    const result = configSchema.safeParse({
+      dataDir: "C:\\test",
+      aiProvider: "openai",
+      apiKeys: {},
+      vectorSearch: "local",
+      browserBackend: "playwright-mcp",
+      mcpServers: {},
+      theme: "system",
+      agent: {
+        loopStrategy: "tree-of-thought",
+        treeMaxDepth: 5,
+      },
+    });
+    expect(result.success).toBe(true);
   });
 });
 

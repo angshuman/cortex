@@ -50,4 +50,6 @@ export const defaultAgentSettings: AgentSettings = {
   fetchTimeout: 30000,
   fetchMaxLength: 50000,
   systemPromptSuffix: "",
+  loopStrategy: "think-act-observe",
+  treeMaxDepth: 5,
 };

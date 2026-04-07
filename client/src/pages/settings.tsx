@@ -50,6 +50,7 @@ import {
   AlertCircle,
   Terminal,
   ExternalLink,
+  Layers,
 } from "lucide-react";
 import { useToast } from "@/hooks/use-toast";
 import { ApiKeySetupDialog } from "@/components/api-key-dialog";
@@ -766,6 +767,8 @@ function AgentSettingsCard({
   const [fetchTimeout, setFetchTimeout] = useState(String(agent.fetchTimeout ?? 15000));
   const [fetchMaxLength, setFetchMaxLength] = useState(String(agent.fetchMaxLength ?? 15000));
   const [systemPromptSuffix, setSystemPromptSuffix] = useState(agent.systemPromptSuffix ?? "");
+  const [loopStrategy, setLoopStrategy] = useState(agent.loopStrategy ?? "think-act-observe");
+  const [treeMaxDepth, setTreeMaxDepth] = useState(String(agent.treeMaxDepth ?? 5));
 
   // Sync when config changes externally
   useEffect(() => {
@@ -776,6 +779,8 @@ function AgentSettingsCard({
     setFetchTimeout(String(a.fetchTimeout ?? 15000));
     setFetchMaxLength(String(a.fetchMaxLength ?? 15000));
     setSystemPromptSuffix(a.systemPromptSuffix ?? "");
+    setLoopStrategy(a.loopStrategy ?? "think-act-observe");
+    setTreeMaxDepth(String(a.treeMaxDepth ?? 5));
   }, [config]);
 
   const saveField = (field: string, raw: string, type: "int" | "float" = "int") => {
@@ -862,6 +867,50 @@ function AgentSettingsCard({
           <p className="text-[10px] text-muted-foreground mt-0.5">
             0 = deterministic, 1 = balanced, 2 = creative
           </p>
+        </div>
+
+        {/* Row 2b: Loop strategy */}
+        <div className="grid grid-cols-2 gap-3">
+          <div>
+            <Label className="text-xs text-muted-foreground flex items-center gap-1.5 mb-1">
+              <Brain className="w-3 h-3" />
+              Loop Strategy
+            </Label>
+            <Select
+              value={loopStrategy}
+              onValueChange={(v) => {
+                setLoopStrategy(v);
+                updateConfig.mutate({ agent: { ...config?.agent, loopStrategy: v } });
+              }}
+            >
+              <SelectTrigger className="h-8 text-xs">
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="think-act-observe">Think-Act-Observe (Default)</SelectItem>
+                <SelectItem value="plan-execute-review">Plan-Execute-Review</SelectItem>
+                <SelectItem value="react">ReAct</SelectItem>
+                <SelectItem value="tree-of-thought">Tree of Thought</SelectItem>
+              </SelectContent>
+            </Select>
+          </div>
+          <div>
+            <Label className="text-xs text-muted-foreground flex items-center gap-1.5 mb-1">
+              <Layers className="w-3 h-3" />
+              ToT Max Depth
+            </Label>
+            <Input
+              className="text-xs h-8 font-mono"
+              type="number"
+              min={1}
+              max={8}
+              value={treeMaxDepth}
+              onChange={(e) => setTreeMaxDepth(e.target.value)}
+              onBlur={() => saveField("treeMaxDepth", treeMaxDepth)}
+              onKeyDown={(e) => { if (e.key === "Enter") saveField("treeMaxDepth", treeMaxDepth); }}
+              data-testid="input-tree-max-depth"
+            />
+          </div>
         </div>
 
         {/* Row 3: Fetch settings */}

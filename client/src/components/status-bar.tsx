@@ -14,7 +14,7 @@ import {
   TooltipContent,
   TooltipTrigger,
 } from "@/components/ui/tooltip";
-import { Zap, Cpu, AlertTriangle, RotateCcw, Layers } from "lucide-react";
+import { Zap, Cpu, AlertTriangle, RotateCcw, Layers, Brain } from "lucide-react";
 
 const PROVIDER_NAMES: Record<string, string> = {
   openai: "OpenAI",
@@ -31,6 +31,13 @@ const PROVIDER_DEFAULT_MODELS: Record<string, string> = {
   grok: "grok-4",
   google: "gemini-2.5-flash",
 };
+
+const LOOP_OPTIONS = [
+  { value: "think-act-observe", label: "Think-Act-Observe" },
+  { value: "plan-execute-review", label: "Plan-Execute-Review" },
+  { value: "react", label: "ReAct" },
+  { value: "tree-of-thought", label: "Tree of Thought" },
+];
 
 function formatTokens(n: number): string {
   if (n >= 1_000_000) return `${(n / 1_000_000).toFixed(1)}M`;
@@ -148,6 +155,7 @@ export function StatusBar() {
 
   // Effective model: explicit override, or the provider's default
   const effectiveModel = config?.aiModel || PROVIDER_DEFAULT_MODELS[provider] || "";
+  const loopStrategy = config?.agent?.loopStrategy || "think-act-observe";
 
   const { data: mcpStatus } = useQuery<Record<string, { connected: boolean; connecting: boolean; label: string; tools: string[] }>>({
     queryKey: ["/api/mcp/status"],
@@ -250,6 +258,29 @@ export function StatusBar() {
           </Tooltip>
         </>
       )}
+
+      {/* Loop strategy selector */}
+      <>
+        <div className="w-px h-3 bg-border/50 mx-1" />
+        <div className="flex items-center gap-0.5">
+          <Brain className="w-3 h-3 mx-1" />
+          <Select
+            value={loopStrategy}
+            onValueChange={(v) => updateConfig.mutate({ agent: { ...config?.agent, loopStrategy: v } })}
+          >
+            <SelectTrigger className="h-5 border-0 bg-transparent shadow-none text-[10px] text-muted-foreground px-1 py-0 min-w-0 w-auto gap-1 focus:ring-0 [&>svg]:w-2.5 [&>svg]:h-2.5">
+              <SelectValue />
+            </SelectTrigger>
+            <SelectContent align="start" side="top" className="min-w-[180px]">
+              {LOOP_OPTIONS.map((opt) => (
+                <SelectItem key={opt.value} value={opt.value} className="text-xs">
+                  {opt.label}
+                </SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
+        </div>
+      </>
 
       {/* Context window fill — shown when in a chat session */}
       {currentSessionId && currentSession?.contextTokens != null && (() => {

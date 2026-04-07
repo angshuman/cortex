@@ -191,6 +191,10 @@ export const agentSettingsSchema = z.object({
   fetchMaxLength: z.number().min(1000).max(200000).default(15000),
   /** Custom text appended to the system prompt. */
   systemPromptSuffix: z.string().default(""),
+  /** Reasoning loop strategy used to structure agent behavior. */
+  loopStrategy: z.enum(["think-act-observe", "plan-execute-review", "react", "tree-of-thought"]).default("think-act-observe"),
+  /** Max depth used by tree-of-thought strategy. */
+  treeMaxDepth: z.number().min(1).max(8).default(5),
 });
 export type AgentSettings = z.infer<typeof agentSettingsSchema>;
 
