@@ -1,6 +1,7 @@
 import type { Express, Request } from "express";
 import type { Server } from "http";
 import { WebSocketServer, WebSocket } from "ws";
+import { skillSchema } from "@shared/schema";
 import { vaultManager, FileStorage } from "./storage";
 import { Agent, type ContextItem } from "./agent";
 import { pickModelForProvider } from "./agent-llm";
@@ -540,6 +541,57 @@ export function registerRoutes(server: Server, app: Express) {
     const store = getVaultStorage(req);
     store.saveSkill(req.body);
     res.json({ success: true });
+  });
+
+  app.post("/api/skills/import", async (req, res) => {
+    const store = getVaultStorage(req);
+    const url = String(req.body?.url || "").trim();
+    if (!url) return res.status(400).json({ error: "url is required" });
+
+    let parsedUrl: URL;
+    try {
+      parsedUrl = new URL(url);
+    } catch {
+      return res.status(400).json({ error: "Invalid URL" });
+    }
+    if (parsedUrl.protocol !== "http:" && parsedUrl.protocol !== "https:") {
+      return res.status(400).json({ error: "Only http/https URLs are allowed" });
+    }
+
+    try {
+      const response = await fetch(parsedUrl.toString(), {
+        headers: { Accept: "application/json, text/plain;q=0.9, */*;q=0.8" },
+      });
+      if (!response.ok) {
+        return res.status(400).json({ error: `Failed to fetch skill (${response.status})` });
+      }
+      const raw = await response.text();
+      if (raw.length > 1_000_000) {
+        return res.status(400).json({ error: "Skill payload too large" });
+      }
+
+      let parsed: any;
+      try {
+        parsed = JSON.parse(raw);
+      } catch {
+        return res.status(400).json({ error: "URL did not return valid JSON" });
+      }
+
+      // Allow wrappers like { skill: {...} } and normalize optional fields
+      const candidate = parsed?.skill ? parsed.skill : parsed;
+      const normalized = {
+        ...candidate,
+        enabled: candidate?.enabled ?? true,
+        builtin: false,
+        filePath: null,
+      };
+
+      const validated = skillSchema.parse(normalized);
+      store.saveSkill(validated);
+      res.json({ success: true, skill: validated.name });
+    } catch (err: any) {
+      res.status(400).json({ error: err?.message || "Failed to import skill" });
+    }
   });
 
   app.put("/api/skills/:name", (req, res) => {

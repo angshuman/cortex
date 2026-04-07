@@ -374,6 +374,7 @@ export function ContextChat({ context, open, onClose, placeholder, width, style,
                         <span className="font-medium">{s.name}</span>
                         <span className="text-muted-foreground">
                           {s.reason === "pinned" ? "pinned" : s.reason === "always" ? "always" : s.reason === "keyword" ? "keyword" : "auto"}
+                          {s.reason === "keyword" && s.matchedKeywords?.length ? ` • ${s.matchedKeywords.slice(0, 1).join(", ")}` : ""}
                         </span>
                       </span>
                     ))}

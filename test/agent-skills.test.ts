@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { selectRelevantSkills } from "../server/agent";
+import { getSignaledSkillActivations, selectRelevantSkills } from "../server/agent";
 import type { Skill } from "@shared/schema";
 
 function mkSkill(partial: Partial<Skill> & Pick<Skill, "name">): Skill {
@@ -48,6 +48,19 @@ describe("selectRelevantSkills", () => {
     const activation = selected.find(s => s.skill.name === "research");
     expect(activation?.reason).toBe("keyword");
     expect(activation?.matchedKeywords).toContain("research");
+  });
+
+  it("signals only keyword/pinned skills (not always-on defaults)", () => {
+    const skills = [
+      mkSkill({ name: "core-a", priority: 0 }),
+      mkSkill({ name: "research", priority: 2, triggerKeywords: ["research"] }),
+      mkSkill({ name: "no-keywords", priority: 2, triggerKeywords: [] }),
+    ];
+    const selected = selectRelevantSkills(skills, "investigate deeply", [], []);
+    const signaled = getSignaledSkillActivations(selected);
+    expect(signaled.some(s => s.skill.name === "research")).toBe(true);
+    expect(signaled.some(s => s.skill.name === "core-a")).toBe(false);
+    expect(signaled.some(s => s.skill.name === "no-keywords")).toBe(false);
   });
 });
 

@@ -21,6 +21,12 @@ export interface SkillActivation {
   matchedKeywords: string[];
 }
 
+export function getSignaledSkillActivations(activations: SkillActivation[]): SkillActivation[] {
+  // Only signal skills that were explicitly picked up for this turn.
+  // "always" and "no_keywords" are baseline/default behavior and stay silent.
+  return activations.filter((a) => a.reason === "pinned" || a.reason === "keyword");
+}
+
 function normalizeText(input: string): string {
   return input
     .toLowerCase()
@@ -354,20 +360,23 @@ Output ONLY valid JSON: { "intent": "..." }`,
     const skillActivations = selectRelevantSkills(this.storage.getSkills(), effectiveMessage, this.context, forcedSkillNames || []);
     let systemPrompt = buildSystemPrompt(this.storage, this.vaultSettings, this.agentSettings, effectiveMessage, this.context, forcedSkillNames);
 
-    this.emit(
-      "thought",
-      `Activated ${skillActivations.length} skills`,
-      {
-        kind: "skills",
-        skills: skillActivations.map((a) => ({
-          name: a.skill.name,
-          category: a.skill.category,
-          reason: a.reason,
-          instructionsOnly: !!a.skill.instructionsOnly,
-          matchedKeywords: a.matchedKeywords,
-        })),
-      },
-    );
+    const signaledSkills = getSignaledSkillActivations(skillActivations);
+    if (signaledSkills.length > 0) {
+      this.emit(
+        "thought",
+        `Picked up ${signaledSkills.length} skill${signaledSkills.length > 1 ? "s" : ""}`,
+        {
+          kind: "skills",
+          skills: signaledSkills.map((a) => ({
+            name: a.skill.name,
+            category: a.skill.category,
+            reason: a.reason,
+            instructionsOnly: !!a.skill.instructionsOnly,
+            matchedKeywords: a.matchedKeywords,
+          })),
+        },
+      );
+    }
 
     // Inject the extracted intent so the model has a clear goal on every loop turn
     // and can verify it has actually been met before producing a final response.

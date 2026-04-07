@@ -373,7 +373,7 @@ export default function ChatPage() {
                         <span className="text-muted-foreground">
                           {s.reason === "pinned" ? "pinned" : s.reason === "always" ? "always" : s.reason === "keyword" ? "keyword" : "auto"}
                           {s.instructionsOnly ? " • instructions" : ""}
-                          {s.matchedKeywords?.length ? ` • ${s.matchedKeywords.slice(0, 2).join(", ")}` : ""}
+                          {s.reason === "keyword" && s.matchedKeywords?.length ? ` • matched: ${s.matchedKeywords.slice(0, 2).join(", ")}` : ""}
                         </span>
                       </span>
                     ))}

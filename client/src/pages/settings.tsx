@@ -201,6 +201,18 @@ export default function SettingsPage() {
     },
   });
 
+  const importSkillFromUrl = useMutation({
+    mutationFn: (url: string) =>
+      apiRequest("POST", withVault("/api/skills/import", vaultParam), { url }).then(r => r.json()),
+    onSuccess: (data: any) => {
+      queryClient.invalidateQueries({ queryKey: ["/api/skills"] });
+      toast({ title: "Skill imported", description: data?.skill ? `Imported ${data.skill}` : "Imported from URL" });
+    },
+    onError: (err: any) => {
+      toast({ title: "Import failed", description: err?.message || "Could not import skill", variant: "destructive" });
+    },
+  });
+
   const deleteSkillMutation = useMutation({
     mutationFn: (name: string) => apiRequest("DELETE", withVault(`/api/skills/${encodeURIComponent(name)}`, vaultParam)),
     onSuccess: () => {
@@ -394,6 +406,36 @@ export default function SettingsPage() {
                     >
                       <Plus className="w-3 h-3 mr-1.5" />
                       New Skill
+                    </Button>
+                  </div>
+
+                  <div className="flex items-center gap-2">
+                    <Input
+                      placeholder="https://example.com/skill.json"
+                      className="h-8 text-xs"
+                      onKeyDown={(e) => {
+                        if (e.key !== "Enter") return;
+                        const value = (e.currentTarget.value || "").trim();
+                        if (!value) return;
+                        importSkillFromUrl.mutate(value);
+                        e.currentTarget.value = "";
+                      }}
+                    />
+                    <Button
+                      size="sm"
+                      variant="outline"
+                      className="h-8 text-xs shrink-0"
+                      onClick={(e) => {
+                        const input = (e.currentTarget.parentElement?.querySelector("input") as HTMLInputElement | null);
+                        const value = (input?.value || "").trim();
+                        if (!value) return;
+                        importSkillFromUrl.mutate(value);
+                        if (input) input.value = "";
+                      }}
+                      disabled={importSkillFromUrl.isPending}
+                    >
+                      {importSkillFromUrl.isPending ? <Loader2 className="w-3 h-3 mr-1 animate-spin" /> : <ExternalLink className="w-3 h-3 mr-1" />}
+                      Import from URL
                     </Button>
                   </div>
 
