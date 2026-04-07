@@ -162,4 +162,19 @@ describe("messagesToOpenAI", () => {
       expect(msg.content).not.toBeNull();
     }
   });
+
+  it("keeps system prompt as first message", () => {
+    const fakeStorage: any = {
+      getChatAsset: () => null,
+      getNoteAsset: () => null,
+      getFile: () => null,
+    };
+    const result = messagesToOpenAI(
+      [{ role: "user", content: "hello" } as any],
+      "my system prompt",
+      fakeStorage,
+    );
+    expect(result[0].role).toBe("system");
+    expect(result[0].content).toBe("my system prompt");
+  });
 });

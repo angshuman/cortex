@@ -349,6 +349,30 @@ async function runOpenAI(
       openaiMessages.push({ role: "assistant", content: msg.content });
     } else {
       logError(`[agent] openai step=${step} finish_reason=${finishReason} — empty response, no tool calls`);
+      // Rare provider edge-case: stream returns finish_reason=stop but no deltas.
+      // Retry once with non-streaming completion so the user still gets an answer.
+      try {
+        const retryResp = await client.chat.completions.create({
+          model,
+          messages: sanitizedOpenAIMessages,
+          tools: openaiTools.length > 0 ? openaiTools : undefined,
+          max_tokens: agentSettings.maxTokens,
+          ...(agentSettings.temperature !== undefined ? { temperature: agentSettings.temperature } : {}),
+          stream: false,
+        } as any);
+        const retryMsg: any = retryResp.choices?.[0]?.message;
+        const retryText = typeof retryMsg?.content === "string" ? retryMsg.content.trim() : "";
+        if (retryText) {
+          emit("message", retryText, { role: "assistant" });
+          messages.push({ role: "assistant", content: retryText });
+          openaiMessages.push({ role: "assistant", content: retryText });
+        } else {
+          emit("message", "*(I couldn't generate visible output for that request. Please retry, or switch model/provider.)*", { role: "assistant" });
+        }
+      } catch (retryErr: any) {
+        logError("[agent] openai non-stream retry failed", retryErr);
+        emit("message", "*(I couldn't generate visible output for that request. Please retry, or switch model/provider.)*", { role: "assistant" });
+      }
     }
     loopCompleted = true;
     break;
